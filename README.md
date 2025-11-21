@@ -12,6 +12,8 @@ MindTask 专为那些觉得传统清单无法应对复杂项目、需要鸟瞰�
 * **思维导图式拆解**：摒弃单一列表，像画思维导图一样将大项目无限拆分为子任务，层级关系一目了然。
 * **无限画布**：提供自由拖拽、缩放的画布视图。
 * **多项目隔离**：支持创建多个独立页面来管理不同领域的任务。
+<img width="1921" height="1150" alt="pic1" src="https://github.com/user-attachments/assets/ef98e003-f7a4-4e69-8c82-6956ecb3ea25" />
+
 
 ### 2. 灵活的任务属性
 * **双重时间维度**：
@@ -19,11 +21,17 @@ MindTask 专为那些觉得传统清单无法应对复杂项目、需要鸟瞰�
     * 🕒 **日程式**：针对需要占用特定时间段的任务。
 * **⚡ 精力等级**：标记 1-5 级精力消耗，支持按精力水平筛选任务。
 * **标题模式**：任务可以一键切换为更加醒目的“标题节点”，用于区隔项目的不同阶段，让导图结构更清晰
+<img width="1004" height="936" alt="pic2" src="https://github.com/user-attachments/assets/c3c5143d-4cff-4526-9162-f362499a44e9" />
+
 
 ### 3. 多维视图与规划
 * **🗺️ 导图视图 (Map View)**：沉浸式规划，支持 Tab/Enter 快捷键快速创建任务，自由拖拽。
 * **📅 日程规划分屏 (Split View)**：左侧导图仓库，右侧日程板。直接**拖拽**任务到对应时间段完成规划。
 * **📊 排序与日历 (Sorter & Calendar)**：提供按任务ddl/日程自动排序列表，和月度日历弹窗视图。
+<img width="1476" height="978" alt="pic3" src="https://github.com/user-attachments/assets/39fdc02c-bc8b-4d50-a403-9ea7651239a1" />
+<img width="1470" height="976" alt="pic4" src="https://github.com/user-attachments/assets/9150cc5a-3bfd-43ca-a6d2-c7b806653954" />
+<img width="1466" height="980" alt="pic5" src="https://github.com/user-attachments/assets/ddf6f19e-eaa9-4050-bf21-b0f5be6c35d6" />
+
 
 ### 4. 极客体验
 * 🌑 **沉浸式深色模式**：专业的深色极客 UI。
