@@ -1,16 +1,51 @@
-# React + Vite
+# MindTask - 基于思维导图的极客任务管理终端
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> **将“思维导图式的项目拆解”与“时间块式的日程规划”完美融合的桌面端生产力工具。**
 
-Currently, two official plugins are available:
+MindTask 专为那些觉得传统清单无法应对复杂项目、需要鸟瞰全局并掌控细节的用户设计。它是一个基于 Electron + React + Tailwind CSS 构建的纯本地桌面应用。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## ✨ 核心特性
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. 结构化项目管理
+* **思维导图式拆解**：摒弃单一列表，像画思维导图一样将大项目无限拆分为子任务，层级关系一目了然。
+* **无限画布**：提供自由拖拽、缩放的画布视图。
+* **多项目隔离**：支持创建多个独立页面来管理不同领域的任务。
 
-## Expanding the ESLint configuration
+### 2. 灵活的任务属性
+* **双重时间维度**：
+    * 📅 **DDL式**：针对有明确截止期限的任务，临期变色提醒。
+    * 🕒 **日程式**：针对需要占用特定时间段的任务。
+* **⚡ 精力等级**：标记 1-5 级精力消耗，支持按精力水平筛选任务。
+* **标题模式**：一键将任务切换为醒目的标题节点，清晰区隔项目阶段。
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### 3. 多维视图与规划
+* **🗺️ 导图视图 (Map View)**：沉浸式规划，支持 Tab/Enter 快捷键快速创建任务，自由拖拽。
+* **📅 日程规划分屏 (Split View)**：左侧导图仓库，右侧日程板。直接**拖拽**任务到对应时间段完成规划。
+* **📊 排序与日历 (Sorter & Calendar)**：提供自动排序列表和月度日历弹窗视图。
+
+### 4. 极客体验
+* 🌑 **沉浸式深色模式**：专业的深色极客 UI。
+* 🔒 **纯本地运行**：数据安全保存在本地，无需联网。
+* 🚀 **开机自启**：支持设置开机自动运行。
+
+---
+
+## 🛠️ 开发与构建
+
+本项目使用以下技术栈构建：
+
+* [Electron](https://www.electronjs.org/)
+* [React](https://reactjs.org/) (via Vite)
+* [Tailwind CSS](https://tailwindcss.com/)
+* [lucide-react](https://lucide.dev/) (图标库)
+
+### 本地运行
+
+```bash
+# 安装依赖
+npm install
+
+# 启动开发服务器 (热更新)
+npm run electron:dev
