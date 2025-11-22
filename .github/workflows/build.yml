@@ -1,0 +1,37 @@
+name: Build and Release
+
+# 触发条件：只有当推送的 tag 是 v 开头（如 v1.0.2）时才触发
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        # 这里决定了我们要用 Windows 和 Mac 两种系统分别打包
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # 使用较新的 Node 版本
+
+      - name: Install Dependencies
+        run: npm install
+
+      # 运行构建命令
+      # 注意：我们会自动使用你在 package.json 里定义的 electron:build 脚本
+      - name: Build & Release
+        uses: samuelmeuli/action-electron-builder@v1
+        with:
+          # 这个 token 是 GitHub 自动生成的，无需你去申请，直接用
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          release: true # 自动把打包好的文件上传到 Releases 页面

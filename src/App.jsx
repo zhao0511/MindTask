@@ -3,7 +3,7 @@ import {
   Plus, Trash2, ChevronRight, Layout, Maximize, Minimize, Folder, MousePointer2, 
   Calendar as CalendarIcon, Clock, Zap, AlignLeft, CheckSquare, Square, X, ArrowUp, ArrowDown, 
   Edit2, GripVertical, Columns, Sun, Sunset, Moon, ChevronLeft, 
-  ChevronRight as ChevronRightIcon, List, Filter, Grid, Check, Undo, Type
+  ChevronRight as ChevronRightIcon, List, Filter, Grid, Check, Undo, Type, Weight
 } from 'lucide-react';
 
 // --- 基础工具 ---
@@ -23,16 +23,67 @@ const formatTime = (isoString) => {
   return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+
+// 新增：获取节点路径辅助函数
+const getNodePath = (node, nodes) => {
+  const path = [];
+  let current = nodes[node.parentId];
+  while (current) {
+    path.unshift(current.text || '未命名');
+    if (current.isRoot || !current.parentId) break;
+    current = nodes[current.parentId];
+  }
+  return path.join(' › '); // 使用漂亮的箭头符号分隔
+};
+
 // 暗色模式下的 DDL 颜色逻辑
-const getDDLStatusColor = (ddl) => {
+// 修改后的 DDL 颜色逻辑 (支持任务量维度)
+const getDDLStatusColor = (ddl, workload = 0) => {
   if (!ddl) return 'bg-gray-700 text-gray-300 border-gray-600';
   const now = new Date();
   const targetStr = ddl.length === 10 ? `${ddl}T23:59:59` : ddl;
   const target = new Date(targetStr);
   const diff = target - now;
+
+  // 1. 已过期：总是红色
   if (diff < 0) return 'bg-red-900/30 text-red-300 border-red-800/50';
-  if (diff < 24 * 60 * 60 * 1000) return 'bg-orange-900/30 text-orange-300 border-orange-800/50';
-  if (diff < 3 * 24 * 60 * 60 * 1000) return 'bg-yellow-900/30 text-yellow-300 border-yellow-800/50';
+
+  // 2. 定义时间常量 (毫秒)
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+
+  let orangeThreshold, yellowThreshold;
+
+  // 3. 根据任务量设定阈值
+  switch (workload) {
+    case 1: // 任务量 1
+      orangeThreshold = 1 * HOUR;
+      yellowThreshold = 3 * HOUR;
+      break;
+    case 2: // 任务量 2
+      orangeThreshold = 6 * HOUR;
+      yellowThreshold = 18 * HOUR;
+      break;
+    case 3: // 任务量 3
+      orangeThreshold = 20 * HOUR;
+      yellowThreshold = 60 * HOUR; // 2.5 天
+      break;
+    case 4: // 任务量 4
+      orangeThreshold = 2 * DAY;
+      yellowThreshold = 7 * DAY;
+      break;
+    case 5: // 任务量 5
+      orangeThreshold = 5 * DAY;
+      yellowThreshold = 18 * DAY;
+      break;
+    default: // 默认 (任务量0或未设置)：方案C (1天/3天)
+      orangeThreshold = 1 * DAY;
+      yellowThreshold = 3 * DAY;
+      break;
+  }
+
+  if (diff < orangeThreshold) return 'bg-orange-900/30 text-orange-300 border-orange-800/50';
+  if (diff < yellowThreshold) return 'bg-yellow-900/30 text-yellow-300 border-yellow-800/50';
   return 'bg-green-900/30 text-green-300 border-green-800/50';
 };
 
@@ -114,7 +165,7 @@ const INITIAL_DATA = {
   }
 };
 
-// --- 组件：自适应文本框 (Grid 方案) ---
+// --- 组件：自适应文本框 ---
 const AutoResizeTextarea = ({ value, onChange, onKeyDown, onFocus, className, placeholder, isRoot, autoFocus }) => {
   const textareaRef = useRef(null);
 
@@ -166,7 +217,11 @@ const MindMapNode = ({
   
   if (!node || (!showCompleted && node.completed && !node.isRoot)) return null;
 
+  // 计算可见的子节点：如果显示已完成，则所有子节点可见；否则，只有未完成的子节点可见
+  const visibleChildren = node.children ? node.children.filter(childId => showCompleted || !nodes[childId]?.completed) : [];
+  const hasVisibleChildren = visibleChildren.length > 0;
   const hasChildren = node.children && node.children.length > 0;
+
   const isFocused = focusedNodeId === nodeId;
   const showHandle = !node.isRoot;
   const isDimmed = energyFilter > 0 && node.energy !== energyFilter && !node.isRoot;
@@ -194,28 +249,21 @@ const MindMapNode = ({
       return end ? `${formatTime(node.scheduleStart)} - ${endStr}` : formatTime(node.scheduleStart);
   };
 
-  // 样式逻辑 (Dark Mode 适配)
-  // 基础卡片：深灰背景，浅灰边框
   // 样式逻辑 (Dark Mode 适配 - 增强边框)
-  // 基础卡片：深灰背景，浅灰边框
-  // 修改点：border-gray-700 改为 border-gray-500，并移除部分 hover 的透明度，让边框更实
   let containerClass = `relative flex flex-col bg-gray-800 border rounded-lg shadow-sm transition-all duration-200 ${isFocused ? 'ring-2 ring-blue-500/80 border-blue-500' : 'border-gray-500 p-2 hover:border-blue-400'}`;
   let textClass = `w-full bg-transparent outline-none text-gray-200 leading-normal text-sm`;
 
   if (node.isRoot) {
-      // 根节点：边框更亮更粗
       containerClass = `relative flex flex-col bg-gray-800 border-blue-500 border-2 p-3 shadow-md shadow-blue-900/20 rounded-lg ${isFocused ? 'ring-2 ring-blue-500/50' : ''}`;
       textClass = `w-full bg-transparent outline-none text-gray-100 leading-normal font-bold text-xl`;
   } else if (isHeading) {
-      // 标题模式：增强边框可见度 (border-gray-500)
       containerClass = `relative flex flex-col bg-gray-800 border rounded-lg shadow-sm transition-all duration-200 p-2 border-gray-500 hover:border-blue-400 ${isFocused ? 'ring-2 ring-blue-500/50 border-blue-500' : ''}`;
       if (depth === 1) {
-          textClass = `w-full bg-transparent outline-none text-gray-100 leading-tight font-bold text-xl`; 
+          textClass = `w-full bg-transparent outline-none text-gray-100 leading-tight font-bold text-lg`; 
       } else {
-          textClass = `w-full bg-transparent outline-none text-gray-200 leading-tight font-bold text-lg`;
+          textClass = `w-full bg-transparent outline-none text-gray-200 leading-tight font-bold text-base`;
       }
   } else {
-      // 普通任务：增强边框可见度 (border-gray-500)
       containerClass = `relative flex flex-col bg-gray-800 border rounded-lg shadow-sm transition-all duration-200 border-gray-500 p-2 hover:border-blue-400 ${isFocused ? 'ring-2 ring-blue-500/50 border-blue-500' : ''} ${node.completed ? 'opacity-50 bg-gray-800/50' : ''}`;
       textClass = `w-full bg-transparent outline-none text-gray-200 leading-normal text-sm ${node.completed ? 'line-through text-gray-500' : ''}`;
   }
@@ -229,10 +277,16 @@ const MindMapNode = ({
       nodeWidthStyle = { minWidth: '260px', width: 'fit-content', maxWidth: '360px' };
   }
 
+  // 1. 定义透明度样式变量
+  const opacityClass = isDimmed ? 'opacity-20 grayscale' : 'opacity-100';
+
   return (
-    <div className={`flex items-center group transition-opacity duration-300 ${isDimmed ? 'opacity-20 grayscale' : 'opacity-100'}`}>
+    // 修改点A：移除最外层 div 的 ${isDimmed ? ...} 样式，避免影响子节点
+    <div className="flex items-center group transition-opacity duration-300">
+      
       {!node.isRoot && (
-        <div className="w-8 self-stretch relative flex items-center justify-center flex-shrink-0 pointer-events-none">
+        // 修改点B：将透明度样式加在左侧连接线上
+        <div className={`w-8 self-stretch relative flex items-center justify-center flex-shrink-0 pointer-events-none ${opacityClass}`}>
           {!isOnlyChild && (
             <>
               {(!isFirstChild || isLastChild) && <div className="absolute top-0 left-0 w-0.5 h-[50%] bg-gray-600" />}
@@ -243,7 +297,8 @@ const MindMapNode = ({
         </div>
       )}
 
-      <div className="flex flex-col items-start justify-center mr-12 relative z-10 py-1">
+      {/* 修改点C：将透明度样式加在节点内容卡片容器上 */}
+      <div className={`flex flex-col items-start justify-center mr-12 relative z-10 py-1 ${opacityClass}`}>
         <div 
           onDragOver={handleDragOver} onDrop={handleDrop} onClick={(e) => { e.stopPropagation(); onFocus && onFocus(nodeId); }}
           className={containerClass}
@@ -275,8 +330,9 @@ const MindMapNode = ({
           
           {(!node.isRoot && !isHeading && (node.timeType || node.energy > 0)) && (
             <div className="flex flex-wrap items-center mt-2 pl-6">
-              {node.timeType === 'ddl' && node.ddl && <NodeBadge icon={CalendarIcon} className={getDDLStatusColor(node.ddl)} text={formatTime(node.ddl)} />}
+              {node.timeType === 'ddl' && node.ddl && <NodeBadge icon={CalendarIcon} className={getDDLStatusColor(node.ddl, node.workload)} text={formatTime(node.ddl)} />}
               {node.timeType === 'schedule' && node.scheduleStart && node.showSpecificTime && <NodeBadge icon={Clock} className="bg-blue-900/30 text-blue-300 border-blue-800/50" text={renderScheduleTime()} />}
+              {node.workload > 0 && <div className="flex gap-0.5 mr-2 mb-1 bg-purple-900/20 px-1.5 py-0.5 rounded-full border border-purple-800/50 h-5 items-center text-purple-400"><Weight size={10} /><span className="text-[10px] font-bold">{node.workload}</span></div>}
               {node.energy > 0 && <div className="flex gap-0.5 mr-2 mb-1 bg-yellow-900/20 px-1.5 py-0.5 rounded-full border border-yellow-800/50 h-5 items-center">{[...Array(node.energy)].map((_, i) => <Zap key={i} size={8} className="text-yellow-500 fill-current" />)}</div>}
             </div>
           )}
@@ -287,17 +343,19 @@ const MindMapNode = ({
               {node.collapsed ? <Plus size={10} className="text-gray-400" /> : <ChevronRight size={10} className="text-gray-400" />}
             </button>
           )}
-          {hasChildren && !node.collapsed && <div className={`absolute right-0 w-12 h-0.5 bg-gray-600 translate-x-full pointer-events-none top-1/2`} />}
+          {hasVisibleChildren && !node.collapsed && <div className={`absolute right-0 w-12 h-0.5 bg-gray-600 translate-x-full pointer-events-none top-1/2`} />}
         </div>
       </div>
-      {hasChildren && !node.collapsed && (
+
+      {/* 修改点D：子节点容器保持原样，不受透明度影响 */}
+      {hasVisibleChildren && !node.collapsed && (
         <div className="flex flex-col justify-center relative"> 
-          {node.children.map((childId, index) => (
+          {visibleChildren.map((childId, index) => (
             <MindMapNode 
               key={childId} nodeId={childId} nodes={nodes} updateNodeText={updateNodeText} toggleComplete={toggleComplete}
               onKeyDown={onKeyDown} onFocus={onFocus} toggleCollapse={toggleCollapse} addChildNode={addChildNode}
               focusedNodeId={focusedNodeId} onDragStart={onDragStart} onDrop={onDrop} energyFilter={energyFilter} showCompleted={showCompleted}
-              isFirstChild={index === 0} isLastChild={index === node.children.length - 1} isOnlyChild={node.children.length === 1}
+              isFirstChild={index === 0} isLastChild={index === visibleChildren.length - 1} isOnlyChild={visibleChildren.length === 1}
               depth={depth + 1} 
             />
           ))}
@@ -308,12 +366,13 @@ const MindMapNode = ({
 };
 
 // --- 组件：日程规划板 ---
-const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText, jumpToTask, deleteNode }) => {
+const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText, jumpToTask, deleteNode, showCompleted }) => {
   const [currentDate, setCurrentDate] = useState(getTodayStr());
   const changeDay = (offset) => setCurrentDate(prev => addDays(prev, offset));
 
   const getTasksForPeriod = (period) => {
     return Object.values(nodes).filter(node => {
+      if (!node.completed || showCompleted) {
       if (node.timeType === 'schedule' && node.scheduleStart) {
         const start = new Date(node.scheduleStart);
         const dateStr = start.toISOString().slice(0, 10);
@@ -325,6 +384,7 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
       }
       if (node.plannedSlots && node.plannedSlots.some(slot => slot.date === currentDate && slot.period === period)) {
         return true;
+      }
       }
       return false;
     });
@@ -384,15 +444,65 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
       <div className="flex-1 p-2 bg-gray-900/50 space-y-2 overflow-y-auto">
         {getTasksForPeriod(period).map(node => (
           <div key={node.id} onClick={() => jumpToTask(node.id)} className="bg-gray-800 p-2 rounded border border-gray-700 shadow-sm text-sm group hover:border-blue-500/50 transition-all relative pr-6 cursor-pointer">
-             <button onClick={(e) => { e.stopPropagation(); removeTaskFromPlanner(node.id, period); }} className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400"><X size={12}/></button>
-             <div className="flex flex-col gap-1">
-               <input className="font-medium text-gray-200 w-full bg-transparent outline-none border-b border-transparent focus:border-blue-500/50 placeholder-gray-600" value={node.text} onClick={(e) => e.stopPropagation()} onChange={(e) => updateNodeText(node.id, e.target.value)} placeholder="输入任务..." />
-               <div className="flex flex-wrap gap-1 items-center">
-                 {node.timeType === 'ddl' && node.ddl && <NodeBadge icon={CalendarIcon} className={getDDLStatusColor(node.ddl)} text={formatTime(node.ddl)} />}
-                 {node.showSpecificTime && node.scheduleStart && <NodeBadge icon={Clock} className="bg-blue-900/30 text-blue-300 border-blue-800/50" text={new Date(node.scheduleStart).getHours() + ':' + String(new Date(node.scheduleStart).getMinutes()).padStart(2,'0')} />}
-                 {node.energy > 0 && <div className="flex gap-0.5 bg-yellow-900/20 px-1 py-0.5 rounded border border-yellow-800/50 items-center">{[...Array(node.energy)].map((_, i) => <Zap key={i} size={8} className="text-yellow-500 fill-current" />)}</div>}
+             <button onClick={(e) => { e.stopPropagation(); removeTaskFromPlanner(node.id, period); }} className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 z-10"><X size={12}/></button>
+             
+             {/* 修改开始：调整布局结构 */}
+             <div className="flex flex-col w-full">
+               {/* 第一行：标题(左) + 图标(右) */}
+               <div className="flex items-start justify-between gap-2 mb-1">
+                  <input 
+                    className="font-medium text-gray-200 bg-transparent outline-none border-b border-transparent focus:border-blue-500/50 placeholder-gray-600 flex-1 min-w-0" 
+                    value={node.text} 
+                    onClick={(e) => e.stopPropagation()} 
+                    onChange={(e) => updateNodeText(node.id, e.target.value)} 
+                    placeholder="输入任务..." 
+                  />
+                  
+                  {/* 图标区域挪到这里 */}
+                  {/* 修改：统一所有图标的高度(h-5)、内边距和字号，确保整齐划一 */}
+                  {/* 修改：全部重写为原生 div，去除 NodeBadge 自带的 mb-1 干扰，实现像素级对齐 */}
+                  <div className="flex flex-wrap gap-1 items-center flex-shrink-0 justify-end">
+                     
+                     {/* DDL: 手动重写，确保 h-5, gap-1, text-[10px], 无边距 */}
+                     {node.timeType === 'ddl' && node.ddl && (
+                        <div className={`h-5 flex items-center gap-1 px-1.5 rounded-full border text-[10px] whitespace-nowrap ${getDDLStatusColor(node.ddl, node.workload)}`}>
+                           <CalendarIcon size={10} />
+                           <span>{formatTime(node.ddl)}</span>
+                        </div>
+                     )}
+                     
+                     {/* Schedule: 手动重写 */}
+                     {node.showSpecificTime && node.scheduleStart && (
+                        <div className="h-5 flex items-center gap-1 px-1.5 rounded-full border text-[10px] whitespace-nowrap bg-blue-900/30 text-blue-300 border-blue-800/50">
+                           <Clock size={10} />
+                           <span>{new Date(node.scheduleStart).getHours() + ':' + String(new Date(node.scheduleStart).getMinutes()).padStart(2,'0')}</span>
+                        </div>
+                     )}
+                     
+                     {/* Energy: 保持不变 (已经是完美的 div) */}
+                     {node.energy > 0 && (
+                        <div className="h-5 flex items-center gap-0.5 bg-yellow-900/20 px-1.5 rounded-full border border-yellow-800/50">
+                           {[...Array(node.energy)].map((_, i) => <Zap key={i} size={8} className="text-yellow-500 fill-current" />)}
+                        </div>
+                     )}
+
+                     {/* Workload: 保持不变 (已经是完美的 div) */}
+                     {node.workload > 0 && (
+                        <div className="h-5 flex items-center gap-1 bg-purple-900/20 px-1.5 rounded-full border border-purple-800/50 text-purple-400">
+                           <Weight size={10} />
+                           <span className="text-[10px] font-bold leading-none">{node.workload}</span>
+                        </div>
+                     )}
+                  
+                  </div>
+               </div>
+
+               {/* 第二行：显示路径 */}
+               <div className="text-[10px] text-gray-400 truncate opacity-80">
+                  {getNodePath(node, nodes)}
                </div>
              </div>
+             {/* 修改结束 */}
           </div>
         ))}
       </div>
@@ -419,31 +529,94 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
 };
 
 // --- 组件：排序与筛选视图 (含日历弹窗) ---
-const SorterView = ({ nodes, updateNodeData, jumpToTask }) => {
+// --- 组件：排序与筛选视图 (已添加“常规任务”列) ---
+const SorterView = ({ nodes, updateNodeData, jumpToTask, showCompleted }) => {
   const [viewType, setViewType] = useState('list'); 
   const [energyFilter, setEnergyFilter] = useState(0); 
   const [calMonth, setCalMonth] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState(null); 
 
-  const filterNodes = (n) => (energyFilter === 0 || n.energy === energyFilter) && !n.isRoot;
+  // 基础筛选逻辑：精力匹配 + 非根节点 + (如果是标题，必须开启了addToFilter)
+  const filterNodes = (n) => (energyFilter === 0 || n.energy === energyFilter) && !n.isRoot && (!n.isHeading || n.addToFilter) && (!n.completed || showCompleted);
+
+  // 1. 获取三类任务数据
   const scheduleTasks = Object.values(nodes).filter(n => n.timeType === 'schedule' && n.scheduleStart && filterNodes(n)).sort((a, b) => new Date(a.scheduleStart) - new Date(b.scheduleStart));
   const ddlTasks = Object.values(nodes).filter(n => n.timeType === 'ddl' && n.ddl && filterNodes(n)).sort((a, b) => new Date(a.ddl) - new Date(b.ddl));
+  // 新增：常规任务 (没有特定时间属性的任务)
+  const normalTasks = Object.values(nodes).filter(n => (!n.timeType || n.timeType === 'null') && filterNodes(n));
 
-  const renderTaskItem = (n, type) => (
-    <div key={n.id} onClick={() => jumpToTask(n.id)} className="flex items-center justify-between p-3 bg-gray-800 border border-gray-700 rounded mb-2 hover:border-blue-500/50 cursor-pointer">
-       <div className="flex items-center gap-2">
-           <div className={`w-1 h-8 rounded-full ${type === 'schedule' ? 'bg-blue-500' : 'bg-red-500'}`} />
-           <div>
-               <div className="font-medium text-gray-200">{n.text || '未命名'}</div>
-               <div className="text-xs text-gray-500 flex gap-2 mt-1">
-                   {type === 'schedule' ? formatTime(n.scheduleStart) : `截止: ${formatTime(n.ddl)}`}
-                   {n.energy > 0 && <span className="text-yellow-500 flex items-center"><Zap size={10} className="fill-current mr-1"/>{n.energy}</span>}
-               </div>
-           </div>
-       </div>
-    </div>
-  );
+  // 渲染单个任务卡片 (已更新：支持 gray 颜色和文本显示)
+  // 渲染单个任务卡片 (已更新：路径在下，图标在右)
+  const renderTaskItem = (n, type) => {
+    let colorClass = 'bg-gray-500';
+    let timeText = ''; // 修改：默认不显示文字，除非有特殊时间
+    let badgeClass = ''; // 用于图标样式
+    
+    if (type === 'schedule') {
+        colorClass = 'bg-blue-500';
+        timeText = formatTime(n.scheduleStart);
+        badgeClass = "text-blue-300 bg-blue-900/30 border-blue-800/50";
+    } else if (type === 'ddl') {
+        colorClass = 'bg-red-500';
+        timeText = formatTime(n.ddl);
+        badgeClass = getDDLStatusColor(n.ddl, n.workload); // 复用 DDL 颜色逻辑
+    }
 
+    // 获取路径
+    const pathStr = getNodePath(n, nodes);
+
+    return (
+      <div key={n.id} onClick={() => jumpToTask(n.id)} className="flex items-stretch p-2 bg-gray-800 border border-gray-700 rounded mb-2 hover:border-blue-500/50 cursor-pointer group">
+         {/* 左侧颜色条 */}
+         <div className={`w-1 rounded-full flex-shrink-0 mr-3 ${colorClass}`} />
+         
+         <div className="flex-1 min-w-0 flex flex-col justify-center">
+             {/* 第一行：标题 + 右侧信息 */}
+             <div className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
+                 <div className="font-medium text-gray-200 text-sm break-words mr-auto">
+                    {n.text || '未命名'}
+                 </div>
+                 
+                 {/* 右侧：时间和精力图标 */}
+                 {/* 右侧图标组：调整顺序，让日期排在最后（最右边） */}
+                 {/* 右侧图标组：添加 ml-auto 强制其永远靠右（即使换行） */}
+                 <div className="flex items-center gap-2 flex-shrink-0 mt-0.5 ml-auto">
+                     
+                     {/* 1. 任务量 (Workload) */}
+                     {n.workload > 0 && (
+                         <div className="flex gap-0.5 items-center bg-purple-900/20 px-1.5 py-0.5 rounded border border-purple-800/50 text-purple-400">
+                             <Weight size={8} />
+                             <span className="text-[9px] font-bold">{n.workload}</span>
+                         </div>
+                     )}
+
+                     {/* 2. 精力 (Energy) */}
+                     {n.energy > 0 && (
+                         <div className="flex gap-0.5 items-center bg-yellow-900/20 px-1.5 py-0.5 rounded border border-yellow-800/50">
+                             {[...Array(n.energy)].map((_, i) => <Zap key={i} size={8} className="text-yellow-500 fill-current" />)}
+                         </div>
+                     )}
+
+                     {/* 3. 时间/日期 (Time/DDL) */}
+                     {timeText && (
+                        <div className={`text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 whitespace-nowrap ${badgeClass}`}>
+                            {type === 'ddl' ? <CalendarIcon size={10}/> : <Clock size={10}/>}
+                            {timeText}
+                        </div>
+                     )}
+                 </div>
+             </div>
+
+             {/* 第二行：路径 */}
+             <div className="text-[10px] text-gray-400 truncate mt-1 opacity-80">
+                {pathStr}
+             </div>
+         </div>
+      </div>
+    );
+  };
+
+  
   const renderCalendar = () => {
     const year = calMonth.getFullYear();
     const month = calMonth.getMonth();
@@ -469,7 +642,7 @@ const SorterView = ({ nodes, updateNodeData, jumpToTask }) => {
             <div className="grid grid-cols-7 flex-1 auto-rows-fr overflow-y-auto">
                 {days.map((d, idx) => {
                     if(!d) return <div key={idx} className="bg-gray-900/50 border-b border-r border-gray-700"/>;
-                    const dayStr = d.toISOString().slice(0, 10);
+                    const dayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                     const dayTasks = Object.values(nodes).filter(n => {
                         if(!filterNodes(n)) return false;
                         if(n.timeType === 'ddl' && n.ddl && n.ddl.startsWith(dayStr)) return true;
@@ -499,14 +672,16 @@ const SorterView = ({ nodes, updateNodeData, jumpToTask }) => {
                             <button onClick={() => setSelectedDay(prev => { const d = new Date(prev); d.setDate(d.getDate()+1); return d; })} className="p-1 hover:bg-gray-700 rounded text-gray-300"><ChevronRightIcon size={16}/></button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                             {/* 仅显示当天关联任务 */}
                              {Object.values(nodes).filter(n => {
                                 const dayStr = selectedDay.toISOString().slice(0, 10);
                                 if(n.timeType === 'ddl' && n.ddl && n.ddl.startsWith(dayStr)) return true;
                                 if(n.timeType === 'schedule' && n.scheduleStart && n.scheduleStart.startsWith(dayStr)) return true;
                                 return false;
-                             }).length === 0 && <div className="text-center text-gray-500 py-4">今日无任务</div>}
+                             }).length === 0 && <div className="text-center text-gray-500 py-4">今日无特定时间任务</div>}
+                             
                              {Object.values(nodes).filter(n => {
-                                const dayStr = selectedDay.toISOString().slice(0, 10);
+                                const dayStr = `${selectedDay.getFullYear()}-${String(selectedDay.getMonth() + 1).padStart(2, '0')}-${String(selectedDay.getDate()).padStart(2, '0')}`;
                                 if(n.timeType === 'ddl' && n.ddl && n.ddl.startsWith(dayStr)) return true;
                                 if(n.timeType === 'schedule' && n.scheduleStart && n.scheduleStart.startsWith(dayStr)) return true;
                                 return false;
@@ -544,16 +719,26 @@ const SorterView = ({ nodes, updateNodeData, jumpToTask }) => {
         </div>
         <div className="flex-1 overflow-y-auto p-6">
             {viewType === 'list' ? (
-                <div className="flex gap-6 h-full">
+                <div className="flex gap-6 h-full min-w-[800px]">
+                    {/* 1. 日程列 */}
                     <div className="flex-1 bg-blue-900/10 p-4 rounded-xl border border-blue-900/50 overflow-y-auto">
                         <h3 className="font-bold text-blue-300 mb-4 flex items-center gap-2"><Clock size={18}/> 日程安排 (Schedule)</h3>
                         {scheduleTasks.map(n => renderTaskItem(n, 'schedule'))}
                         {scheduleTasks.length === 0 && <div className="text-center text-gray-500 text-sm mt-10">无日程任务</div>}
                     </div>
+                    
+                    {/* 2. DDL 列 */}
                     <div className="flex-1 bg-red-900/10 p-4 rounded-xl border border-red-900/50 overflow-y-auto">
                         <h3 className="font-bold text-red-300 mb-4 flex items-center gap-2"><CalendarIcon size={18}/> 截止日期 (DDL)</h3>
                         {ddlTasks.map(n => renderTaskItem(n, 'ddl'))}
                         {ddlTasks.length === 0 && <div className="text-center text-gray-500 text-sm mt-10">无 DDL 任务</div>}
+                    </div>
+
+                    {/* 3. 常规任务列 (新增) */}
+                    <div className="flex-1 bg-gray-700/20 p-4 rounded-xl border border-gray-700/50 overflow-y-auto">
+                        <h3 className="font-bold text-gray-300 mb-4 flex items-center gap-2"><List size={18}/> 待办清单 (To-Do)</h3>
+                        {normalTasks.map(n => renderTaskItem(n, 'normal'))}
+                        {normalTasks.length === 0 && <div className="text-center text-gray-500 text-sm mt-10">无常规任务</div>}
                     </div>
                 </div>
             ) : (
@@ -601,6 +786,21 @@ const PropertiesPanel = ({ nodeId, node, updateNodeText, updateNodeData, onClose
             </div>
         )}
 
+        {/* 新增：仅在是标题节点时显示的设置选项 */}
+        {node.isHeading && (
+           <div className="flex items-center justify-between bg-gray-900 p-3 rounded-lg border border-gray-700 mt-2">
+               <div className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                   <Filter size={16}/> 加入筛选/日历
+               </div>
+               <div 
+                   onClick={() => updateNodeData(nodeId, { addToFilter: !node.addToFilter })}
+                   className={`w-10 h-5 rounded-full flex items-center p-0.5 cursor-pointer transition-colors ${node.addToFilter ? 'bg-blue-600' : 'bg-gray-600'}`}
+               >
+                   <div className={`w-4 h-4 bg-white rounded-full shadow transform transition-transform ${node.addToFilter ? 'translate-x-5' : 'translate-x-0'}`} />
+               </div>
+           </div>
+        )}
+
         <div className="space-y-1 border-b border-gray-700 pb-4">
              <label className="text-[10px] text-gray-500 font-semibold uppercase">任务内容</label>
              <textarea value={node.text} onChange={(e) => updateNodeText(nodeId, e.target.value)} rows={2} className="w-full text-lg font-medium text-gray-100 bg-transparent outline-none resize-none focus:bg-gray-700 rounded p-1 -ml-1" />
@@ -624,7 +824,7 @@ const PropertiesPanel = ({ nodeId, node, updateNodeText, updateNodeData, onClose
               <div className="animate-in fade-in zoom-in duration-200">
                   <label className="text-[10px] text-gray-500 mb-1 block">截止日期</label>
                   <div className="flex items-center gap-2">
-                     <input type={isFullDateTime ? "datetime-local" : "date"} value={node.ddl || ''} onChange={(e) => updateNodeData(nodeId, { ddl: e.target.value })} className="flex-1 border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" />
+                     <input type={isFullDateTime ? "datetime-local" : "date"} value={node.ddl || ''} onChange={(e) => updateNodeData(nodeId, { ddl: e.target.value })} className="flex-1 border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
                      {!isFullDateTime && (<button onClick={handleTimeAdd} className="px-2 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs whitespace-nowrap" title="添加具体时间">+ 时间</button>)}
                   </div>
               </div>
@@ -637,11 +837,11 @@ const PropertiesPanel = ({ nodeId, node, updateNodeText, updateNodeData, onClose
                    </div>
                    <div>
                         <label className="text-[10px] text-gray-500 mb-1 block">开始时间</label>
-                        <input type="datetime-local" value={node.scheduleStart || ''} onChange={(e) => updateNodeData(nodeId, { scheduleStart: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" />
+                        <input type="datetime-local" value={node.scheduleStart || ''} onChange={(e) => updateNodeData(nodeId, { scheduleStart: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
                    </div>
                    <div>
                         <label className="text-[10px] text-gray-500 mb-1 block">结束时间</label>
-                        <input type="datetime-local" value={node.scheduleEnd || ''} onChange={(e) => updateNodeData(nodeId, { scheduleEnd: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" />
+                        <input type="datetime-local" value={node.scheduleEnd || ''} onChange={(e) => updateNodeData(nodeId, { scheduleEnd: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
                    </div>
               </div>
           )}
@@ -659,6 +859,22 @@ const PropertiesPanel = ({ nodeId, node, updateNodeText, updateNodeData, onClose
             ))}
           </div>
         </div>
+        {node.timeType !== 'schedule' && (
+        <div className="space-y-2 mt-3 border-t border-gray-700 pt-3">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1"><Weight size={14} /> 任务量 (影响DDL颜色)</label>
+            {node.workload > 0 && <button onClick={() => updateNodeData(nodeId, { workload: 0 })} className="text-[10px] text-gray-500 hover:text-red-400 underline">清除</button>}
+          </div>
+          <div className="flex gap-1">
+            {[1, 2, 3, 4, 5].map(level => (
+              <button key={level} onClick={() => updateNodeData(nodeId, { workload: node.workload === level ? 0 : level })} className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-all ${node.workload === level ? 'bg-purple-900/50 border-purple-500 text-purple-300' : 'bg-gray-900 border-gray-700 text-gray-500 hover:bg-gray-700'}`}>
+                <Weight size={14} className={node.workload === level ? "fill-current" : ""} />
+              </button>
+            ))}
+          </div>
+        </div>
+        )}
+
         <div className="space-y-2">
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1"><AlignLeft size={14} /> 备注</label>
           <textarea rows={5} value={node.notes || ''} onChange={(e) => updateNodeData(nodeId, { notes: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none resize-none" placeholder="添加详细说明..." />
@@ -697,7 +913,8 @@ export default function MindMapTaskApp() {
   const [viewMode, setViewMode] = useState('map'); 
   const [projectEnergyFilter, setProjectEnergyFilter] = useState(0); 
 
-  const [transform, setTransform] = useState({ x: 50, y: 50, scale: 1 });
+  // 修改点5：调整初始和复位坐标到更中心的位置 (例如 100, 100)
+  const [transform, setTransform] = useState({ x: 100, y: 100, scale: 1 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef(null); 
@@ -753,7 +970,51 @@ export default function MindMapTaskApp() {
 
   const updateNodeText = (nodeId, newText) => setNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], text: newText } })); 
   const updateNodeData = (nodeId, data) => setNodesWithHistory(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], ...data } }));
-  const toggleComplete = (nodeId) => setNodesWithHistory(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], completed: !prev[nodeId].completed } }));
+  
+  // 修改点3：辅助函数 - 递归将所有子节点标记为完成
+  const setAllChildrenComplete = (nodeId, currentNodes, nextNodes) => {
+    const node = currentNodes[nodeId];
+    if(node.children){
+        node.children.forEach(childId => {
+            nextNodes[childId] = {...currentNodes[childId], completed: true};
+            setAllChildrenComplete(childId, currentNodes, nextNodes);
+        });
+    }
+  }
+
+  // 修改点3：完成任务时的智能提示逻辑
+  const toggleComplete = (nodeId) => {
+    const node = nodes[nodeId];
+    const newCompletedState = !node.completed;
+
+    if (newCompletedState) { // 标记为完成时
+        let hasIncompleteChild = false;
+        // 检查是否有未完成的子孙节点
+        const checkIncomplete = (id) => {
+            if(nodes[id].children) {
+                nodes[id].children.forEach(cid => {
+                    if(!nodes[cid].completed) hasIncompleteChild = true;
+                    checkIncomplete(cid);
+                })
+            }
+        }
+        checkIncomplete(nodeId);
+
+        if (hasIncompleteChild) {
+            if (window.confirm("此任务包含未完成的子任务。是否一并并将它们全部标记为完成？")) {
+                const nextNodes = { ...nodes, [nodeId]: { ...node, completed: true } };
+                setAllChildrenComplete(nodeId, nodes, nextNodes);
+                setNodesWithHistory(nextNodes);
+            }
+            // 如果用户取消，则什么都不做
+        } else {
+            setNodesWithHistory(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], completed: true } }));
+        }
+    } else {
+        // 标记为未完成时，直接切换
+        setNodesWithHistory(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], completed: false } }));
+    }
+  };
 
   const changeViewMode = (mode) => {
       if (mode === viewMode) setViewMode('map');
@@ -827,6 +1088,37 @@ export default function MindMapTaskApp() {
     });
     setFocusedNodeId(null);
   };
+  
+  // 修改点2：一键删除所有已完成任务的函数
+  const deleteCompletedTasks = () => {
+    if (!window.confirm("确定要删除所有已完成的任务吗？此操作不可撤销。")) return;
+
+    const newNodes = { ...nodes };
+    let changed = false;
+
+    Object.keys(newNodes).forEach(nodeId => {
+      const node = newNodes[nodeId];
+      // 删除已完成的非根节点
+      if (node.completed && !node.isRoot) {
+        // 从父节点的 children 列表中移除
+        if (node.parentId && newNodes[node.parentId]) {
+          newNodes[node.parentId] = {
+            ...newNodes[node.parentId],
+            children: newNodes[node.parentId].children.filter(id => id !== nodeId)
+          };
+        }
+        // 删除节点本身
+        delete newNodes[nodeId];
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      setNodesWithHistory(newNodes);
+      setFocusedNodeId(null);
+    }
+  };
+
   const toggleCollapse = (nodeId) => setNodes(prev => ({ ...prev, [nodeId]: { ...prev[nodeId], collapsed: !prev[nodeId].collapsed } }));
   const onDragStart = (nodeId) => {};
   const onDrop = (draggedNodeId, targetNodeId) => {
@@ -871,6 +1163,49 @@ export default function MindMapTaskApp() {
     }
   };
   const handleMouseMove = (e) => { if (isDragging) setTransform({ ...transform, x: e.clientX - dragStart.x, y: e.clientY - dragStart.y }); };
+  // --- 在 addNewPage 函数之前添加 ---
+
+  const deletePage = (pageId) => {
+    if (pages.length <= 1) {
+        alert("为了保持数据结构完整，请至少保留一个项目。");
+        return;
+    }
+    if (window.confirm("确定删除此项目及其所有任务吗？此操作不可撤销。")) {
+        const pageToDelete = pages.find(p => p.id === pageId);
+        
+        // 1. 递归收集该项目下的所有节点 ID
+        const nodesToDelete = new Set();
+        const collect = (id) => {
+            if (!nodes[id]) return;
+            nodesToDelete.add(id);
+            const n = nodes[id];
+            if (n && n.children) {
+                n.children.forEach(childId => collect(childId));
+            }
+        };
+        
+        // 从该项目的根节点开始收集
+        if (pageToDelete && pageToDelete.rootId) {
+            collect(pageToDelete.rootId);
+        }
+
+        // 2. 更新页面列表 (删除 Page)
+        const newPages = pages.filter(p => p.id !== pageId);
+        setPages(newPages);
+
+        // 3. 更新节点数据 (物理删除所有关联的 Nodes)
+        setNodesWithHistory(prev => {
+            const next = { ...prev };
+            nodesToDelete.forEach(id => delete next[id]);
+            return next;
+        });
+
+        // 4. 如果删除的是当前正在看的项目，自动切换到剩下的第一个项目
+        if (activePageId === pageId) {
+            setActivePageId(newPages[0].id);
+        }
+    }
+  };
   const addNewPage = () => {
     const newRootId = generateId(); const newPageId = generateId();
     const newPage = { id: newPageId, title: '新项目', rootId: newRootId };
@@ -894,6 +1229,10 @@ export default function MindMapTaskApp() {
              <div className="px-3 py-2 flex items-center gap-2 text-sm text-gray-400 border-t border-gray-700 mt-2 pt-4">
                  <input type="checkbox" checked={showCompleted} onChange={(e) => setShowCompleted(e.target.checked)} className="rounded text-blue-500 bg-gray-700 border-gray-600" /> 显示已完成
              </div>
+             {/* 修改点2：新增“删除已完成”按钮 */}
+             <div className="px-3 py-1">
+                <button onClick={deleteCompletedTasks} className="flex items-center gap-1 text-xs text-red-400 hover:text-red-300"><Trash2 size={12}/> 删除已完成</button>
+             </div>
              {history.length > 0 && (
                  <div className="px-3 py-1">
                      <button onClick={handleUndo} className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-400"><Undo size={12}/> 撤销 (Ctrl+Z)</button>
@@ -901,22 +1240,50 @@ export default function MindMapTaskApp() {
              )}
           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 mt-4">项目列表</div>
           {pages.map(page => (
-            <div key={page.id} onClick={() => setActivePageId(page.id)} onDoubleClick={() => setEditingPageId(page.id)} className={`flex items-center px-3 py-2 rounded-md cursor-pointer mb-1 text-sm transition-colors group ${activePageId === page.id ? 'bg-blue-900/30 text-blue-300 font-medium' : 'text-gray-400 hover:bg-gray-800'}`}>
-              <Folder size={16} className="mr-2 opacity-70 flex-shrink-0" />
-              {editingPageId === page.id ? (<input autoFocus type="text" value={page.title} onChange={(e) => updatePageTitle(page.id, e.target.value)} onBlur={() => setEditingPageId(null)} onKeyDown={(e) => e.key === 'Enter' && setEditingPageId(null)} className="bg-gray-700 border border-gray-600 rounded px-1 w-full outline-none text-gray-200" />) : (<span className="truncate w-full">{page.title}</span>)}
-              {editingPageId !== page.id && (<Edit2 size={12} className="ml-auto opacity-0 group-hover:opacity-50" />)}
-            </div>
-          ))}
+               <div key={page.id} onClick={() => setActivePageId(page.id)} onDoubleClick={() => setEditingPageId(page.id)} className={`flex items-center px-3 py-2 rounded-md cursor-pointer mb-1 text-sm transition-colors group relative ${activePageId === page.id ? 'bg-blue-900/30 text-blue-300 font-medium' : 'text-gray-400 hover:bg-gray-800'}`}>
+                 <Folder size={16} className="mr-2 opacity-70 flex-shrink-0" />
+                 {editingPageId === page.id ? (
+                    <input autoFocus type="text" value={page.title} onChange={(e) => setPages(pages.map(p => p.id === page.id ? {...p, title: e.target.value} : p))} onBlur={() => setEditingPageId(null)} onKeyDown={(e) => e.key === 'Enter' && setEditingPageId(null)} className="bg-gray-700 border border-gray-600 rounded px-1 w-full outline-none text-gray-200" />
+                 ) : (
+                    // 关键修改1：添加 pr-14 (约56px) 为右侧按钮组留出空间，防止文字重叠
+                    <span className="truncate w-full pr-14">{page.title}</span>
+                 )}
+                 
+                 {/* 关键修改2：将编辑和删除按钮放入同一个绝对定位的容器中 */}
+                 {editingPageId !== page.id && (
+                    <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-900/90 rounded px-1 shadow-sm z-10">
+                        {/* 编辑按钮 */}
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); setEditingPageId(page.id); }} 
+                            className="p-1.5 text-gray-400 hover:text-blue-400 hover:bg-gray-700 rounded transition-colors"
+                            title="重命名"
+                        >
+                            <Edit2 size={12} />
+                        </button>
+                        {/* 删除按钮 */}
+                        <button 
+                            onClick={(e) => { e.stopPropagation(); deletePage(page.id); }} 
+                            className="p-1.5 text-gray-400 hover:text-red-400 hover:bg-red-900/50 rounded transition-colors"
+                            title="删除项目"
+                        >
+                            <Trash2 size={12}/>
+                        </button>
+                    </div>
+                 )}
+               </div>
+             ))}
+             
         </div>
         <div className="p-3 border-t border-gray-700"><button onClick={addNewPage} className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-200 py-2 px-4 rounded-md text-sm transition-colors"><Plus size={16} /> 新建项目</button></div>
       </div>
 
       {viewMode === 'sorter' ? (
-          <SorterView nodes={nodes} updateNodeData={updateNodeData} jumpToTask={jumpToTask} />
+          <SorterView nodes={nodes} updateNodeData={updateNodeData} jumpToTask={jumpToTask} showCompleted={showCompleted} />
       ) : (
           <div className="flex-1 flex overflow-hidden relative">
+            {/* 修改点4：大幅降低背景点阵的透明度 (rgba(71, 85, 105, 0.2))，使其更低调 */}
             <div ref={containerRef} className="flex-1 relative bg-gray-900 overflow-hidden cursor-grab active:cursor-grabbing" onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}>
-                <div className="absolute top-0 left-0 origin-top-left transition-transform duration-75 ease-out" style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, width: '400%', height: '400%', left: '-150%', top: '-150%', backgroundImage: 'radial-gradient(#475569 1.5px, transparent 1.5px)', backgroundSize: '24px 24px', pointerEvents: 'none' }} />
+                <div className="absolute top-0 left-0 origin-top-left transition-transform duration-75 ease-out" style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, width: '400%', height: '400%', left: '-150%', top: '-150%', backgroundImage: 'radial-gradient(rgba(71, 85, 105, 0.2) 1.5px, transparent 1.5px)', backgroundSize: '24px 24px', pointerEvents: 'none' }} />
                 
                 <div className="absolute top-4 left-4 z-30 bg-gray-900/90 backdrop-blur p-1.5 rounded-lg shadow border border-gray-700 flex items-center gap-2 text-xs" onMouseDown={(e) => e.stopPropagation()}>
                     <span className="text-gray-400 font-medium px-1">精力过滤:</span>
@@ -938,12 +1305,13 @@ export default function MindMapTaskApp() {
                     <span className="text-xs text-gray-400 w-8 text-center">{Math.round(transform.scale * 100)}%</span>
                     <button className="p-1.5 hover:bg-gray-800 rounded text-gray-400" onClick={() => setTransform(prev => ({ ...prev, scale: Math.max(0.1, prev.scale - 0.1) }))}><Minimize size={18} /></button>
                     <div className="w-px h-4 bg-gray-700 mx-1" />
-                    <button className="p-1.5 hover:bg-gray-800 rounded text-gray-400" onClick={() => setTransform({ x: 50, y: 50, scale: 1 })}><MousePointer2 size={18} /></button>
+                    {/* 修改点5：点击复位按钮回到更中心的坐标 (100, 100) */}
+                    <button className="p-1.5 hover:bg-gray-800 rounded text-gray-400" onClick={() => setTransform({ x: 100, y: 100, scale: 1 })}><MousePointer2 size={18} /></button>
                 </div>
             </div>
 
             {viewMode === 'split' && (
-                <PlannerBoard nodes={nodes} updateNodeData={updateNodeData} createPlannerTask={createPlannerTask} updateNodeText={updateNodeText} jumpToTask={jumpToTask} deleteNode={deleteNode} />
+                <PlannerBoard nodes={nodes} updateNodeData={updateNodeData} createPlannerTask={createPlannerTask} updateNodeText={updateNodeText} jumpToTask={jumpToTask} deleteNode={deleteNode} showCompleted={showCompleted}/>
             )}
           </div>
       )}

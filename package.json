@@ -1,7 +1,7 @@
 {
   "name": "mind-task-app",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.2.0",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -49,6 +49,17 @@
     "win": {
       "target": "nsis",
       "icon": "public/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/icon.icns",
+      "artifactName": "${productName}_${version}_mac.${ext}" // 设置生成的文件名
+    },
+    "nsis": {
+      "oneClick": false,         
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true, 
+      "createStartMenuShortcut": true
     }
   }
 }
