@@ -53,7 +53,7 @@
     "mac": {
       "target": "dmg",
       "icon": "public/icon.icns",
-      "artifactName": "${productName}_${version}_mac.${ext}" // 设置生成的文件名
+      "artifactName": "${productName}_${version}_mac.${ext}" 
     },
     "nsis": {
       "oneClick": false,         
