@@ -29,9 +29,12 @@ jobs:
 
       # 运行构建命令
       # 注意：我们会自动使用你在 package.json 里定义的 electron:build 脚本
-      - name: Build & Release
-        uses: samuelmeuli/action-electron-builder@v1
-        with:
-          # 这个 token 是 GitHub 自动生成的，无需你去申请，直接用
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          release: true # 自动把打包好的文件上传到 Releases 页面
+      - name: 1. Run VITE Build (Build Frontend)
+        # 这一步将运行 package.json 里的 "build": "vite build" 脚本
+        run: npm run build
+
+      - name: 2. Build and Publish Artifacts
+        # 这一步明确告诉 electron-builder 打包所有平台 (-wml) 并上传
+        run: npx electron-builder -wml --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
