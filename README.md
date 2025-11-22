@@ -1,16 +1,107 @@
-# React + Vite
+# MindTask - 基于思维导图的极客任务管理终端
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+> **将“思维导图式的项目拆解”与“时间块式的日程规划”完美融合的桌面端生产力工具。**
 
-Currently, two official plugins are available:
+MindTask 专为那些觉得传统清单无法应对复杂项目、需要鸟瞰全局并掌控细节的用户设计。它是一个基于 Electron + React + Tailwind CSS 构建的纯本地桌面应用。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+---
 
-## React Compiler
+## ✨ 核心特性
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. 结构化项目管理
+* **思维导图式拆解**：摒弃单一列表，像画思维导图一样将大项目无限拆分为子任务，层级关系一目了然。
 
-## Expanding the ESLint configuration
+   按 Tab 键一键新建子任务，按 Enter 键一键新建同级任务。拖拽一个任务到另一个任务上可将其设置成子任务。
+  
+* **无限画布**：提供自由拖拽、缩放的画布视图。
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+   可按住 Ctrl 键滚动鼠标滚轮缩放，或点击右上角按钮缩放；右上角最右边按钮点击即可回到视图中央。
+
+* **多项目隔离**：支持创建多个独立页面来管理不同领域的任务。
+
+<img width="1921" height="1150" alt="pic1" src="https://github.com/user-attachments/assets/ef98e003-f7a4-4e69-8c82-6956ecb3ea25" />
+
+
+### 2. 灵活的任务属性
+* **双重时间维度**：
+    * 📅 **DDL式**：针对有明确截止期限的任务，临期变色提醒。
+    * 🕒 **日程式**：针对需要占用特定时间段的任务。
+* **⚡ 精力等级**：标记 1-5 级精力消耗，支持按精力水平筛选任务。
+* **标题模式**：任务可以一键切换为更加醒目的“标题节点”，用于区隔项目的不同阶段，让导图结构更清晰
+<img width="1004" height="936" alt="pic2" src="https://github.com/user-attachments/assets/c3c5143d-4cff-4526-9162-f362499a44e9" />
+
+
+### 3. 多维视图与规划
+* **🗺️ 导图视图 (Map View)**：主视图，沉浸式规划，支持 Tab/Enter 快捷键快速创建任务，自由拖拽。
+
+      在任意其他视图中，点击左上角即可回到主视图（或再点击一下所在的视图名称也可回到主视图）。
+
+* **📅 日程规划分屏 (Split View)**：左侧导图仓库，右侧日程板。直接**拖拽**任务到安排的时间段完成规划。
+
+      一个非日程式的任务可以自由拖拽到日程板的多个时间段；日程式的任务会根据时间自动显示在对应时间段。
+* **📊 排序与日历 (Sorter & Calendar)**：提供按任务ddl/日程自动排序列表，和月度日历弹窗视图。
+
+      排序筛选界面包括全部项目的任务，整体按其为ddl式/日程式/无时间安排式分成三栏，前两栏按时间排序。
+
+      日历界面中点击一天即可查看当天截止/日程在当天的所有任务。
+
+      在排序界面和日历界面中，也支持按精力筛选任务，帮助进行规划.
+
+      日程规划视图、排序视图、日历视图中的任务点击后均可直接定位到其在主视图中的位置。
+
+<img width="1476" height="978" alt="pic3" src="https://github.com/user-attachments/assets/39fdc02c-bc8b-4d50-a403-9ea7651239a1" />
+<img width="1470" height="976" alt="pic4" src="https://github.com/user-attachments/assets/9150cc5a-3bfd-43ca-a6d2-c7b806653954" />
+<img width="1466" height="980" alt="pic5" src="https://github.com/user-attachments/assets/ddf6f19e-eaa9-4050-bf21-b0f5be6c35d6" />
+
+
+### 4. 极客体验
+* **沉浸式深色模式**：专业的深色极客 UI。
+* **纯本地运行**：数据安全保存在本地，无需联网。
+* **自动聚焦与清理**：完成的任务勾选后会自动淡化/隐藏（可配置），保持界面清爽；可一键删除已完成任务；新建任务时自动聚焦输入框。
+
+## v1.1.0版本更新内容
+
+1. 最重要的：现在这个软件终于像一个正常软件了——安装包下载后可**自选安装位置**，且修复了之前每次从快捷方式打开都等价于重新安装软件的问题
+
+   增加了打开软件**自动检测更新**的功能（但暂未实现自动更新，需要点开弹窗显示的新版本链接并下载安装包，然后安装时装在同一位置即可覆盖上一版本实现更新）
+
+2. 在主视图之外的视图中（如日程板、任务排序），会在任务下方**显示父级路径**（如 项目一 › 阶段二），这样可以更好适配思维导图的结构，在编辑任务名时可以更加简洁，不用附带重复信息
+
+3. 任务新增**任务量属性**，并且可以和ddl联动，ddl显示的颜色（代表紧迫程度）会同时取决于任务量和离ddl的时间
+
+4. 标题节点现在默认不显示在任务排序、日历等视图中，不过对每个标题节点均可自行设置
+
+5. 修复了上一版本日历日期对应错误的问题
+
+6. 修复了任务排序筛选视图中任务名过长时无法显示完整的问题（现在可以自动换行）
+
+7. 修复了已完成的任务依然显示在主视图以外的视图中的问题
+
+<img width="499" height="344" alt="image" src="https://github.com/user-attachments/assets/e9eeaa63-0573-49e4-9626-dfc7bec6e91d" />
+
+图例：任务量属性图标及其对ddl颜色的影响，任务父级路径的显示
+
+---
+
+## 安装软件
+
+点击右边栏中的 “[Releases](https://github.com/zhao0511/MindTask/releases/tag/v1.1.0)” 选择最新版本下载。
+
+
+## 🛠️ 开发与构建
+
+本项目使用以下技术栈构建：
+
+* [Electron](https://www.electronjs.org/)
+* [React](https://reactjs.org/) (via Vite)
+* [Tailwind CSS](https://tailwindcss.com/)
+* [lucide-react](https://lucide.dev/) (图标库)
+
+### 本地运行
+
+```bash
+# 安装依赖
+npm install
+
+# 启动开发服务器 (热更新)
+npm run electron:dev
