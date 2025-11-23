@@ -1,18 +1,20 @@
 name: Build and Release
 
-# 触发条件：只有当推送的 tag 是 v 开头（如 v1.0.2）时才触发
 on:
   push:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ${{ matrix.os }}
-    
+
     strategy:
       matrix:
-        # 这里决定了我们要用 Windows 和 Mac 两种系统分别打包
+        # 这里定义了两个并行任务：一个在 Windows 跑，一个在 Mac 跑
         os: [windows-latest, macos-latest]
 
     steps:
@@ -22,19 +24,25 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20 # 使用较新的 Node 版本
+          node-version: 20
 
       - name: Install Dependencies
         run: npm install
 
-      # 运行构建命令
-      # 注意：我们会自动使用你在 package.json 里定义的 electron:build 脚本
-      - name: 1. Run VITE Build (Build Frontend)
-        # 这一步将运行 package.json 里的 "build": "vite build" 脚本
+      # 1. 构建前端 (Vite Build) - 两个平台都要做
+      - name: Run VITE Build
         run: npm run build
 
-      - name: 2. Build and Publish Artifacts
-        # 这一步明确告诉 electron-builder 打包所有平台 (-wml) 并上传
-        run: npx electron-builder -wml --publish always
+      # 2. Windows 专用打包命令 (只在 Windows 环境运行)
+      - name: Build & Release (Windows)
+        if: matrix.os == 'windows-latest'
+        run: npx electron-builder --windows --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 3. Mac 专用打包命令 (只在 Mac 环境运行)
+      - name: Build & Release (Mac)
+        if: matrix.os == 'macos-latest'
+        run: npx electron-builder --mac --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
