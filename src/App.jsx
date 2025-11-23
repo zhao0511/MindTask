@@ -3,10 +3,11 @@ import {
   Plus, Trash2, ChevronRight, Layout, Maximize, Minimize, Folder, MousePointer2, 
   Calendar as CalendarIcon, Clock, Zap, AlignLeft, CheckSquare, Square, X, ArrowUp, ArrowDown, 
   Edit2, GripVertical, Columns, Sun, Sunset, Moon, ChevronLeft, 
-  ChevronRight as ChevronRightIcon, List, Filter, Grid, Check, Undo, Type, Weight
+  ChevronRight as ChevronRightIcon, List, Filter, Grid, Check, Undo, Type, Weight, Info, ExternalLink
 } from 'lucide-react';
 
 // --- 基础工具 ---
+const { ipcRenderer, shell } = window.require('electron');
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const getTodayStr = () => new Date().toISOString().slice(0, 10);
 const addDays = (dateStr, days) => {
@@ -1349,8 +1350,81 @@ const PropertiesPanel = ({ nodeId, node, updateNodeText, updateNodeData, onClose
   );
 };
 
+
+// --- 组件：关于与更新模态框 ---
+// --- 组件：关于与更新模态框 (UI 优化版) ---
+const AboutModal = ({ isOpen, onClose, updateInfo }) => {
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center" onClick={onClose}>
+            {/* 修改点1：宽度从 w-96 改为 w-[500px] */}
+            <div className="bg-gray-800 border border-gray-700 w-[500px] rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+                {/* 头部 */}
+                <div className="p-4 border-b border-gray-700 flex items-center justify-between bg-gray-900">
+                    <span className="font-bold text-gray-200 flex items-center gap-2"><Info size={18} className="text-blue-400"/> 关于 MindTask</span>
+                    <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={18} /></button>
+                </div>
+
+                <div className="p-6 space-y-6">
+                    {/* 1. 基本信息与 Github 链接 */}
+                    <div className="text-center space-y-2">
+                        <h2 className="text-3xl font-bold text-white">MindTask</h2>
+                        <p className="text-gray-400 text-base">当前版本: <span className="font-mono text-gray-200">{updateInfo.currentVersion || '...'}</span></p>
+                        <button 
+                            onClick={() => shell.openExternal('https://github.com/zhao0511/MindTask')}
+                            className="text-blue-400 hover:text-blue-300 text-sm flex items-center justify-center gap-1 mx-auto mt-2 hover:underline"
+                        >
+                            <ExternalLink size={14} /> 访问 GitHub 主页
+                        </button>
+                    </div>
+
+                    {/* 2. 更新检查结果 */}
+                    <div className="bg-gray-900/50 rounded-lg p-5 border border-gray-700">
+                        <h3 className="text-base font-bold text-gray-200 mb-3">更新检查</h3>
+                        {updateInfo.hasUpdate ? (
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-green-400 text-sm font-bold px-2 py-1 bg-green-900/30 rounded">发现新版本 {updateInfo.latestVersion}</span>
+                                </div>
+                                
+                                {/* 修改点2 & 3：增大字号(text-sm)，调亮颜色(text-gray-300)，增加行高(leading-relaxed)，增加可视高度(max-h-60) */}
+                                <div className="text-sm text-gray-300 max-h-60 overflow-y-auto whitespace-pre-wrap border-l-2 border-gray-600 pl-3 leading-relaxed scrollbar-thin">
+                                    {updateInfo.releaseNotes || '暂无更新日志'}
+                                </div>
+                                
+                                <button 
+                                    onClick={() => shell.openExternal(updateInfo.downloadUrl)}
+                                    className="w-full bg-green-700 hover:bg-green-600 text-white font-medium text-sm py-2.5 rounded transition-colors shadow-lg shadow-green-900/20"
+                                >
+                                    去 GitHub 下载更新
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="text-gray-400 text-sm flex items-center gap-2 py-2">
+                                <Check size={16} className="text-green-500" /> 当前已是最新版本
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 3. 反馈渠道 */}
+                    <div className="text-center pt-2 border-t border-gray-700/50">
+                        <p className="text-sm text-gray-500">反馈问题可以到树洞 <span className="text-gray-300 font-mono select-all">7832291</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- 主应用组件 ---
 export default function MindMapTaskApp() {
+
+// ... 在其他 useState 附近 ...
+const [showAbout, setShowAbout] = useState(false);
+const [updateInfo, setUpdateInfo] = useState({ currentVersion: '', hasUpdate: false });
+const [showRedDot, setShowRedDot] = useState(false);
+
   // --- LocalStorage 读取数据 ---
   const [pages, setPages] = useState(() => {
     const saved = localStorage.getItem('mindtask-pages');
@@ -1383,6 +1457,38 @@ export default function MindMapTaskApp() {
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef(null); 
+
+// 启动时检查更新
+useEffect(() => {
+    const check = async () => {
+        // 调用 Main 进程接口
+        const res = await ipcRenderer.invoke('check-update');
+        if (res && !res.error) {
+            setUpdateInfo(res);
+            
+            // 红点逻辑：有更新 && 本地没记录过这个新版本
+            if (res.hasUpdate) {
+                const seenVersion = localStorage.getItem('mindtask-seen-version');
+                if (seenVersion !== res.latestVersion) {
+                    setShowRedDot(true);
+                }
+            }
+        }
+    };
+    check();
+}, []);
+
+// 处理点击关于按钮
+const handleOpenAbout = () => {
+    setShowAbout(true);
+    if (showRedDot) {
+        setShowRedDot(false);
+        // 记录已读版本
+        if (updateInfo.latestVersion) {
+            localStorage.setItem('mindtask-seen-version', updateInfo.latestVersion);
+        }
+    }
+};
 
   // --- 监听数据变化并自动保存 ---
   useEffect(() => {
@@ -1878,7 +1984,7 @@ const quickAddTask = (parentId, taskData = {}) => {
              ))}
              
         </div>
-    <div className="p-3 border-t border-gray-700">
+    <div className="p-3 border-t border-gray-700 space-y-2">
     {/* 新增：快速添加任务按钮 */}
     <button 
         onClick={() => setQuickAddState({ visible: true, mode: 'create', targetData: null })} 
@@ -1890,6 +1996,19 @@ const quickAddTask = (parentId, taskData = {}) => {
     <button onClick={addNewPage} className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-200 py-2 px-4 rounded-md text-sm transition-colors">
         <Plus size={16} /> 新建项目
     </button>
+
+{/* 3. 👇 新增：关于/设置 按钮 (带红点) 👇 */}
+    <button 
+        onClick={handleOpenAbout} 
+        className="w-full flex items-center justify-center gap-2 text-gray-400 hover:text-gray-200 py-2 px-4 rounded-md text-xs transition-colors relative"
+    >
+        <Info size={14} /> 关于与更新
+        {/* 红点 */}
+        {showRedDot && (
+            <span className="absolute top-2 right-3 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+        )}
+    </button>
+
     </div>
       </div>
 
@@ -1945,6 +2064,13 @@ const quickAddTask = (parentId, taskData = {}) => {
           quickAddTask={quickAddTask} 
           updateNodeData={updateNodeData}
       />
+
+      {/* 👇 插入 AboutModal 👇 */}
+<AboutModal 
+    isOpen={showAbout} 
+    onClose={() => setShowAbout(false)} 
+    updateInfo={updateInfo} 
+/>
 
     </div>
   );
