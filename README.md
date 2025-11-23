@@ -85,9 +85,8 @@ MindTask 专为那些觉得传统清单无法应对复杂项目、需要鸟瞰�
 
 ## 安装软件
 
-点击右边栏中的 “[Releases](https://github.com/zhao0511/MindTask/releases/tag/v1.1.0)” 选择最新版本下载。
+点击 “[Releases](https://github.com/zhao0511/MindTask/releases/tag/v1.3,1)” 选择最新版本下载。
 
-上面的版本没有Mac版，Mac用户可以到[这里](https://github.com/zhao0511/MindTask/releases/tag/v1.2.2)下载。
 
 ## 🛠️ 开发与构建
 
