@@ -87,6 +87,8 @@ const getDDLStatusColor = (ddl, workload = 0) => {
   return 'bg-green-900/30 text-green-300 border-green-800/50';
 };
 
+// --- Global Constant (Before INITIAL_PAGE_ID) ---
+const ALL_PAGES_ROOT_ID = 'all-pages-root';
 const INITIAL_PAGE_ID = 'page-1';
 const INITIAL_ROOT_ID = 'root-1';
 const PLANNER_HIDDEN_ROOT_ID = 'planner-hidden-root';
@@ -282,7 +284,7 @@ const MindMapNode = ({
 
   return (
     // 修改点A：移除最外层 div 的 ${isDimmed ? ...} 样式，避免影响子节点
-    <div className="flex items-center group transition-opacity duration-300">
+    <div id={`node-${nodeId}`} className="flex items-center group transition-opacity duration-300">
       
       {!node.isRoot && (
         // 修改点B：将透明度样式加在左侧连接线上
@@ -366,51 +368,88 @@ const MindMapNode = ({
 };
 
 // --- 组件：日程规划板 ---
-const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText, jumpToTask, deleteNode, showCompleted }) => {
+// --- 组件：日程规划板 (集成复选框、拖拽排序、滚动优化) ---
+// --- 组件：日程规划板 (箭头排序版) ---
+const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText, jumpToTask, deleteNode, showCompleted, setQuickAddState, toggleComplete }) => {
   const [currentDate, setCurrentDate] = useState(getTodayStr());
   const changeDay = (offset) => setCurrentDate(prev => addDays(prev, offset));
 
   const getTasksForPeriod = (period) => {
     return Object.values(nodes).filter(node => {
       if (!node.completed || showCompleted) {
-      if (node.timeType === 'schedule' && node.scheduleStart) {
-        const start = new Date(node.scheduleStart);
-        const dateStr = start.toISOString().slice(0, 10);
-        const hour = start.getHours();
-        if (dateStr !== currentDate) return false;
-        if (period === 'morning') return hour < 12;
-        if (period === 'afternoon') return hour >= 12 && hour < 18;
-        if (period === 'evening') return hour >= 18;
-      }
-      if (node.plannedSlots && node.plannedSlots.some(slot => slot.date === currentDate && slot.period === period)) {
-        return true;
-      }
+        if (node.timeType === 'schedule' && node.scheduleStart) {
+            const start = new Date(node.scheduleStart);
+            const dateStr = start.toISOString().slice(0, 10);
+            const hour = start.getHours();
+            if (dateStr !== currentDate) return false;
+            if (period === 'morning') return hour < 12;
+            if (period === 'afternoon') return hour >= 12 && hour < 18;
+            if (period === 'evening') return hour >= 18;
+        }
+        if (node.plannedSlots && node.plannedSlots.some(slot => slot.date === currentDate && slot.period === period)) {
+            return true;
+        }
       }
       return false;
-    });
+    }).sort((a, b) => (a.plannerRank || 0) - (b.plannerRank || 0));
   };
 
+  // 1. 处理外部拖入 (保持不变)
   const handleDrop = (e, period) => {
     e.preventDefault();
     const nodeId = e.dataTransfer.getData('text/plain');
     if (!nodeId || !nodes[nodeId]) return;
+    
+    // 这里的拖拽只处理从“导图”拖进来的新任务
     const node = nodes[nodeId];
+    // 给个新 rank 确保在最后
+    const newRank = Date.now(); 
 
     if (node.timeType === 'schedule') {
       let defaultHour = 9;
       if (period === 'afternoon') defaultHour = 14;
       if (period === 'evening') defaultHour = 19;
       const newStart = `${currentDate}T${String(defaultHour).padStart(2, '0')}:00`;
-      updateNodeData(nodeId, { scheduleStart: newStart });
+      updateNodeData(nodeId, { scheduleStart: newStart, plannerRank: newRank });
     } else {
       const newSlot = { date: currentDate, period };
       const exists = node.plannedSlots?.some(s => s.date === currentDate && s.period === period);
       if (!exists) {
         updateNodeData(nodeId, { 
-          plannedSlots: [...(node.plannedSlots || []), newSlot] 
+          plannedSlots: [...(node.plannedSlots || []), newSlot],
+          plannerRank: newRank 
         });
       }
     }
+  };
+
+  // 2. 新增：上下移动任务
+  const moveTask = (e, nodeId, period, direction) => {
+      e.stopPropagation(); // 防止触发跳转
+      const tasks = getTasksForPeriod(period);
+      const index = tasks.findIndex(n => n.id === nodeId);
+      if (index === -1) return;
+      
+      const targetIndex = index + direction;
+      // 边界检查
+      if (targetIndex < 0 || targetIndex >= tasks.length) return;
+
+      const currentNode = tasks[index];
+      const targetNode = tasks[targetIndex];
+
+      // 交换 Rank 逻辑
+      // 如果 rank 不存在或相等(旧数据)，则用当前的 index 作为基础进行交换
+      let rankCurrent = currentNode.plannerRank;
+      let rankTarget = targetNode.plannerRank;
+
+      if (rankCurrent === undefined || rankTarget === undefined || rankCurrent === rankTarget) {
+          rankCurrent = index;
+          rankTarget = targetIndex;
+      }
+
+      // 执行交换更新
+      updateNodeData(currentNode.id, { plannerRank: rankTarget });
+      updateNodeData(targetNode.id, { plannerRank: rankCurrent });
   };
 
   const removeTaskFromPlanner = (nodeId, period) => {
@@ -432,77 +471,106 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
       if (period === 'afternoon') defaultHour = 14;
       if (period === 'evening') defaultHour = 19;
       const start = `${currentDate}T${String(defaultHour).padStart(2, '0')}:00`;
-      createPlannerTask({ scheduleStart: start, timeType: 'schedule', showSpecificTime: false });
+      createPlannerTask({ scheduleStart: start, timeType: 'schedule', showSpecificTime: false, plannerRank: Date.now() });
+  };
+
+  const handleQuickSelect = (period) => {
+    setQuickAddState({ 
+        visible: true, 
+        mode: 'select', 
+        targetData: { type: 'slot', date: currentDate, period } 
+    });
   };
 
   const renderZone = (title, icon, period, bgColor, borderColor) => (
-    <div className="flex-1 flex flex-col border-r border-gray-700 last:border-r-0 min-w-[200px]" onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, period)}>
-      <div className={`p-2 font-semibold text-sm flex items-center justify-between ${bgColor} text-gray-200 border-b ${borderColor}`}>
+    <div className="flex-1 flex flex-col border-r border-gray-700 last:border-r-0 min-w-[200px] min-h-0" onDragOver={(e) => e.preventDefault()} onDrop={(e) => handleDrop(e, period)}>
+      <div className={`p-2 font-semibold text-sm flex items-center justify-between ${bgColor} text-gray-200 border-b ${borderColor} flex-shrink-0`}>
         <div className="flex items-center gap-2">{icon}{title}</div>
-        <button onClick={() => handleCreateTask(period)} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-blue-400 transition-colors"><Plus size={14} /></button>
+        <div className="flex items-center gap-1">
+            <button onClick={() => handleQuickSelect(period)} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-green-400 transition-colors"><List size={14} /></button>
+            <button onClick={() => handleCreateTask(period)} className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-blue-400 transition-colors"><Plus size={14} /></button>
+        </div>
       </div>
-      <div className="flex-1 p-2 bg-gray-900/50 space-y-2 overflow-y-auto">
-        {getTasksForPeriod(period).map(node => (
-          <div key={node.id} onClick={() => jumpToTask(node.id)} className="bg-gray-800 p-2 rounded border border-gray-700 shadow-sm text-sm group hover:border-blue-500/50 transition-all relative pr-6 cursor-pointer">
+      
+      <div className="flex-1 p-2 bg-gray-900/50 space-y-2 overflow-y-auto min-h-0">
+        {getTasksForPeriod(period).map((node, index, array) => (
+          <div 
+            key={node.id} 
+            // 移除 draggable
+            onClick={() => jumpToTask(node.id, true)} 
+            className={`bg-gray-800 p-2 rounded border border-gray-700 shadow-sm text-sm group hover:border-blue-500/50 transition-all relative pr-6 pl-1 flex gap-2 items-start ${node.completed ? 'opacity-60' : ''}`}
+          >
              <button onClick={(e) => { e.stopPropagation(); removeTaskFromPlanner(node.id, period); }} className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 z-10"><X size={12}/></button>
              
-             {/* 修改开始：调整布局结构 */}
-             <div className="flex flex-col w-full">
-               {/* 第一行：标题(左) + 图标(右) */}
-               <div className="flex items-start justify-between gap-2 mb-1">
+             {/* 新增：上下移动控制条 (左侧) */}
+             <div className="flex flex-col gap-0.5 pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                 <button 
+                    onClick={(e) => moveTask(e, node.id, period, -1)} 
+                    disabled={index === 0}
+                    className="text-gray-500 hover:text-blue-400 disabled:opacity-30 disabled:hover:text-gray-500"
+                 >
+                     <ArrowUp size={12} />
+                 </button>
+                 <button 
+                    onClick={(e) => moveTask(e, node.id, period, 1)} 
+                    disabled={index === array.length - 1}
+                    className="text-gray-500 hover:text-blue-400 disabled:opacity-30 disabled:hover:text-gray-500"
+                 >
+                     <ArrowDown size={12} />
+                 </button>
+             </div>
+
+             {/* 内容区域 */}
+             <div className="flex-1 min-w-0 flex flex-col">
+               <div className="flex items-start gap-2 mb-1">
+                  {/* 复选框 */}
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); toggleComplete(node.id); }} 
+                    className="mt-0.5 text-gray-500 hover:text-blue-400 transition-colors flex-shrink-0"
+                  >
+                    {node.completed ? <CheckSquare size={16} className="text-gray-500" /> : <Square size={16} />}
+                  </button>
+
                   <input 
-                    className="font-medium text-gray-200 bg-transparent outline-none border-b border-transparent focus:border-blue-500/50 placeholder-gray-600 flex-1 min-w-0" 
+                    className={`font-medium text-gray-200 bg-transparent outline-none border-b border-transparent focus:border-blue-500/50 placeholder-gray-600 flex-1 min-w-0 ${node.completed ? 'line-through text-gray-500' : ''}`}
                     value={node.text} 
                     onClick={(e) => e.stopPropagation()} 
                     onChange={(e) => updateNodeText(node.id, e.target.value)} 
                     placeholder="输入任务..." 
                   />
                   
-                  {/* 图标区域挪到这里 */}
-                  {/* 修改：统一所有图标的高度(h-5)、内边距和字号，确保整齐划一 */}
-                  {/* 修改：全部重写为原生 div，去除 NodeBadge 自带的 mb-1 干扰，实现像素级对齐 */}
+                  {/* 属性图标 */}
                   <div className="flex flex-wrap gap-1 items-center flex-shrink-0 justify-end">
-                     
-                     {/* DDL: 手动重写，确保 h-5, gap-1, text-[10px], 无边距 */}
                      {node.timeType === 'ddl' && node.ddl && (
                         <div className={`h-5 flex items-center gap-1 px-1.5 rounded-full border text-[10px] whitespace-nowrap ${getDDLStatusColor(node.ddl, node.workload)}`}>
                            <CalendarIcon size={10} />
                            <span>{formatTime(node.ddl)}</span>
                         </div>
                      )}
-                     
-                     {/* Schedule: 手动重写 */}
                      {node.showSpecificTime && node.scheduleStart && (
                         <div className="h-5 flex items-center gap-1 px-1.5 rounded-full border text-[10px] whitespace-nowrap bg-blue-900/30 text-blue-300 border-blue-800/50">
                            <Clock size={10} />
                            <span>{new Date(node.scheduleStart).getHours() + ':' + String(new Date(node.scheduleStart).getMinutes()).padStart(2,'0')}</span>
                         </div>
                      )}
-                     
-                     {/* Energy: 保持不变 (已经是完美的 div) */}
                      {node.energy > 0 && (
                         <div className="h-5 flex items-center gap-0.5 bg-yellow-900/20 px-1.5 rounded-full border border-yellow-800/50">
                            {[...Array(node.energy)].map((_, i) => <Zap key={i} size={8} className="text-yellow-500 fill-current" />)}
                         </div>
                      )}
-
-                     {/* Workload: 保持不变 (已经是完美的 div) */}
                      {node.workload > 0 && (
                         <div className="h-5 flex items-center gap-1 bg-purple-900/20 px-1.5 rounded-full border border-purple-800/50 text-purple-400">
                            <Weight size={10} />
                            <span className="text-[10px] font-bold leading-none">{node.workload}</span>
                         </div>
                      )}
-                  
                   </div>
                </div>
 
-               {/* 第二行：显示路径 */}
-               <div className="text-[10px] text-gray-400 truncate opacity-80">
+               <div className="text-[10px] text-gray-400 truncate opacity-80 pl-6">
                   {getNodePath(node, nodes)}
                </div>
              </div>
-             {/* 修改结束 */}
           </div>
         ))}
       </div>
@@ -511,7 +579,7 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
 
   return (
     <div className="h-full flex flex-col bg-gray-800 border-l border-gray-700 shadow-xl z-30 w-[450px] flex-shrink-0">
-      <div className="p-4 border-b border-gray-700 flex items-center justify-between bg-gray-900">
+      <div className="p-4 border-b border-gray-700 flex items-center justify-between bg-gray-900 flex-shrink-0">
         <h2 className="font-bold text-gray-200 flex items-center gap-2"><CalendarIcon size={18} className="text-blue-500" />日程板</h2>
         <div className="flex items-center bg-gray-800 rounded border border-gray-600">
             <button onClick={() => changeDay(-1)} className="p-1.5 hover:bg-gray-700 text-gray-400 border-r border-gray-600"><ChevronLeft size={14} /></button>
@@ -519,7 +587,7 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
             <button onClick={() => changeDay(1)} className="p-1.5 hover:bg-gray-700 text-gray-400 border-l border-gray-600"><ChevronRightIcon size={14} /></button>
         </div>
       </div>
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {renderZone('上午', <Sun size={16} className="text-orange-400"/>, 'morning', 'bg-orange-900/20', 'border-orange-900/50')}
         {renderZone('下午', <Sunset size={16} className="text-blue-400"/>, 'afternoon', 'bg-blue-900/20', 'border-blue-900/50')}
         {renderZone('晚上', <Moon size={16} className="text-indigo-400"/>, 'evening', 'bg-indigo-900/20', 'border-indigo-900/50')}
@@ -566,7 +634,7 @@ const SorterView = ({ nodes, updateNodeData, jumpToTask, showCompleted }) => {
     const pathStr = getNodePath(n, nodes);
 
     return (
-      <div key={n.id} onClick={() => jumpToTask(n.id)} className="flex items-stretch p-2 bg-gray-800 border border-gray-700 rounded mb-2 hover:border-blue-500/50 cursor-pointer group">
+      <div key={n.id} onClick={() => jumpToTask(n.id, false)} className="flex items-stretch p-2 bg-gray-800 border border-gray-700 rounded mb-2 hover:border-blue-500/50 cursor-pointer group">
          {/* 左侧颜色条 */}
          <div className={`w-1 rounded-full flex-shrink-0 mr-3 ${colorClass}`} />
          
@@ -749,6 +817,398 @@ const SorterView = ({ nodes, updateNodeData, jumpToTask, showCompleted }) => {
   );
 };
 
+// --- 辅助组件：快速任务编辑器 (PropertiesPanel UI 克隆) ---
+const QuickTaskEditor = ({ taskState, setTaskState }) => {
+    // 任务属性更新通用函数
+    const updateTaskData = (data) => setTaskState(prev => ({ ...prev, ...data }));
+    
+    // 辅助函数：处理 DDL 添加时间
+    const handleTimeAdd = () => {
+        const baseDate = taskState.ddl && taskState.ddl.length >= 10 ? taskState.ddl.slice(0, 10) : getTodayStr();
+        updateTaskData({ ddl: `${baseDate}T12:00` });
+    };
+    const isFullDateTime = taskState.ddl && taskState.ddl.length > 10;
+    
+    return (
+        <div className="space-y-6 flex-1 overflow-y-auto pb-4">
+            
+            {/* 时间属性 */}
+            <div className="space-y-3">
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1"><Clock size={14} /> 时间属性</label>
+              <div className="flex rounded-md bg-gray-700 p-1">
+                {[{ id: null, label: '无' }, { id: 'ddl', label: '截止时间' }, { id: 'schedule', label: '日程' }].map(type => (
+                  <button key={String(type.id)} onClick={() => updateTaskData({ timeType: type.id })} className={`flex-1 text-xs py-1.5 rounded transition-all ${taskState.timeType === type.id ? 'bg-gray-600 shadow-sm text-blue-300 font-medium' : 'text-gray-400 hover:text-gray-200'}`}>{type.label}</button>
+                ))}
+              </div>
+              {taskState.timeType === 'ddl' && (
+                <div className="animate-in fade-in zoom-in duration-200">
+                  <label className="text-[10px] text-gray-500 mb-1 block">截止日期</label>
+                  <div className="flex items-center gap-2">
+                    <input type={isFullDateTime ? "datetime-local" : "date"} value={taskState.ddl || ''} onChange={(e) => updateTaskData({ ddl: e.target.value })} className="flex-1 border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
+                    {!isFullDateTime && (<button onClick={handleTimeAdd} className="px-2 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded text-xs whitespace-nowrap" title="添加具体时间">+ 时间</button>)}
+                  </div>
+                </div>
+              )}
+              {taskState.timeType === 'schedule' && (
+                <div className="space-y-2 animate-in fade-in zoom-in duration-200">
+                    <div className="flex items-center gap-2 mb-2">
+                        <input type="checkbox" id="showTime" checked={!!taskState.showSpecificTime} onChange={(e) => updateTaskData({ showSpecificTime: e.target.checked })} />
+                        <label htmlFor="showTime" className="text-xs text-gray-500">在卡片上显示具体时间点</label>
+                    </div>
+                    <div>
+                        <label className="text-[10px] text-gray-500 mb-1 block">开始时间</label>
+                        <input type="datetime-local" value={taskState.scheduleStart || ''} onChange={(e) => updateTaskData({ scheduleStart: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
+                    </div>
+                    <div>
+                        <label className="text-[10px] text-gray-500 mb-1 block">结束时间</label>
+                        <input type="datetime-local" value={taskState.scheduleEnd || ''} onChange={(e) => updateTaskData({ scheduleEnd: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
+                    </div>
+                </div>
+              )}
+            </div>
+            
+            {/* 精力设置 */}
+            <div className="space-y-2 pt-3 border-t border-gray-700">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1"><Zap size={14} /> 消耗精力</label>
+                {taskState.energy > 0 && <button onClick={() => updateTaskData({ energy: 0 })} className="text-[10px] text-gray-500 hover:text-red-400 underline">清除</button>}
+              </div>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map(level => (
+                  <button key={level} onClick={() => updateTaskData({ energy: taskState.energy === level ? 0 : level })} className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-all ${taskState.energy >= level ? 'bg-yellow-900/50 border-yellow-500 text-yellow-300' : 'bg-gray-900 border-gray-700 text-gray-500 hover:bg-gray-700'}`}>
+                    <Zap size={14} fill={taskState.energy >= level ? "currentColor" : "none"} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 任务量设置 */}
+            {taskState.timeType !== 'schedule' && (
+            <div className="space-y-2 mt-3 border-t border-gray-700 pt-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1"><Weight size={14} /> 任务量 (影响DDL颜色)</label>
+                {taskState.workload > 0 && <button onClick={() => updateTaskData({ workload: 0 })} className="text-[10px] text-gray-500 hover:text-red-400 underline">清除</button>}
+              </div>
+              <div className="flex gap-1">
+                {[1, 2, 3, 4, 5].map(level => (
+                  <button key={level} onClick={() => updateTaskData({ workload: taskState.workload === level ? 0 : level })} className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-all ${taskState.workload === level ? 'bg-purple-900/50 border-purple-500 text-purple-300' : 'bg-gray-900 border-gray-700 text-gray-500 hover:bg-gray-700'}`}>
+                    <Weight size={14} className={taskState.workload === level ? "fill-current" : ""} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            )}
+            
+            {/* 备注 */}
+            <div className="space-y-2 pt-3 border-t border-gray-700">
+                <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1"><AlignLeft size={14} /> 备注</label>
+                <textarea rows={5} value={taskState.notes || ''} onChange={(e) => updateTaskData({ notes: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none resize-none" placeholder="添加详细说明..." />
+            </div>
+
+        </div>
+    );
+};
+
+// --- 辅助组件：平铺列表展示节点 (修复：允许进入无子任务的节点) ---
+const FlatNodeList = ({ children, nodes, currentViewId, setCurrentViewId, selectTask, isSelectMode, handleCreationSwitch, pages }) => {
+    
+    const isProjectSelectView = currentViewId === ALL_PAGES_ROOT_ID;
+
+    // 1. 渲染“项目”条目
+    const renderPageItem = (page) => (
+        <div 
+            key={page.id} 
+            onClick={() => setCurrentViewId(page.rootId)} 
+            className="flex items-center justify-between p-2 rounded cursor-pointer transition-colors hover:bg-gray-700/50"
+        >
+            <div className="flex items-center gap-3 truncate">
+                <Folder size={16} className="text-blue-400 flex-shrink-0" />
+                <span className="font-medium truncate text-gray-200">{page.title}</span>
+            </div>
+            <ChevronRight size={16} className="text-gray-500 flex-shrink-0" />
+        </div>
+    );
+
+    // 2. 渲染“任务节点”条目
+    const renderNodeItem = (nodeId) => {
+        const node = nodes[nodeId];
+        if (!node || node.completed) return null;
+
+        // 判断是否有子节点 (用于显示图标，但不限制点击)
+        const hasChildren = node.children && node.children.some(cid => !nodes[cid]?.completed);
+        
+        const handleClick = () => {
+             // 🟢 核心修复：无论是否有子节点，点击都进入该节点 (Drill Down)
+             // 这样才能选中“叶子节点”或者为“叶子节点”添加子任务
+             setCurrentViewId(node.id); 
+        };
+
+        const isCurrentSelection = isSelectMode && currentViewId === nodeId;
+
+        return (
+            <div 
+                key={node.id} 
+                onClick={handleClick}
+                className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors 
+                           ${isCurrentSelection ? 'bg-blue-800 border border-blue-600' : 'hover:bg-gray-700/50'}`}
+            >
+                <div className="flex items-center gap-3 truncate">
+                    {/* 图标逻辑：有子节点显示文件夹，否则不显示图标 */}
+                    {hasChildren ? <Folder size={16} className="text-blue-400 flex-shrink-0" /> : <span className="w-4 h-4 inline-block"/>}
+                    <span className="font-medium truncate text-gray-200">
+                        {node.text || '未命名'}
+                    </span>
+                </div>
+                <ChevronRight size={16} className={`text-gray-500 flex-shrink-0 ${hasChildren ? 'opacity-100' : 'opacity-30'}`} />
+            </div>
+        );
+    };
+
+    return (
+        <div className="space-y-1">
+            {isProjectSelectView 
+                ? pages.map(renderPageItem) 
+                : children.map(childId => renderNodeItem(childId))
+            }
+            
+            {/* 日程板模式下的底部操作按钮 */}
+            {isSelectMode && (
+                <div className="pt-4 flex gap-4 border-t border-gray-700 mt-4">
+                    <button 
+                        onClick={() => selectTask(currentViewId)} 
+                        className="flex-1 bg-green-700 hover:bg-green-600 text-white font-medium py-2 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="将选中的任务安排到此时间段"
+                        // 根节点不能被选择
+                        disabled={isProjectSelectView || (nodes[currentViewId] && nodes[currentViewId].isRoot)} 
+                    >
+                        确认选择任务
+                    </button>
+                    
+                    <button 
+                        onClick={handleCreationSwitch} 
+                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="在当前父节点下创建新任务并安排到此时间段"
+                        disabled={isProjectSelectView}
+                    >
+                        添加新任务
+                    </button>
+                </div>
+            )}
+            
+            {/* 空状态提示优化 */}
+            {isProjectSelectView && pages.length === 0 && <div className="text-center text-gray-500 p-8">暂无项目</div>}
+            {!isProjectSelectView && children.length === 0 && (
+                <div className="text-center text-gray-500 p-8 flex flex-col items-center gap-2">
+                    <span>此节点无子任务</span>
+                    {isSelectMode && <span className="text-xs text-gray-400">(点击下方按钮选中此节点，或添加子任务)</span>}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// --- 主组件：快速添加/选择任务模态框 (实现 Drill-Down 导航) ---
+// --- 主组件：快速添加/选择任务模态框 (修复初始视图逻辑) ---
+// --- 主组件：快速添加/选择任务模态框 (修复状态同步) ---
+const NodePickerModal = ({ nodes, pages, activePageId, quickAddState, setQuickAddState, quickAddTask, updateNodeData }) => {
+    
+    const [currentViewId, setCurrentViewId] = useState(ALL_PAGES_ROOT_ID);
+    const [viewHistory, setViewHistory] = useState([]); 
+    const [taskCreationData, setTaskCreationData] = useState({});
+
+    const isSelectMode = quickAddState.mode === 'select';
+    
+    useEffect(() => {
+        if (quickAddState.visible) {
+            setCurrentViewId(ALL_PAGES_ROOT_ID);
+            setViewHistory([]);
+            // 初始化：parentId 设为 null，等待用户选择项目
+            setTaskCreationData({ text: '', parentId: null, ...quickAddState.targetData });
+        }
+    }, [quickAddState.visible]); // 注意：这里不依赖 quickAddState.mode，防止切换模式时重置视图
+
+    const childrenToShow = nodes[currentViewId]?.children || [];
+    
+    const currentViewNode = nodes[currentViewId];
+    const pathNodes = [];
+    let current = nodes[currentViewId];
+    while (current && !current.isRoot) {
+        pathNodes.unshift(current);
+        current = nodes[current.parentId];
+    }
+    
+    const goBack = () => {
+        if (viewHistory.length > 0) {
+            const lastId = viewHistory[viewHistory.length - 1];
+            const newHistory = viewHistory.slice(0, -1);
+            setCurrentViewId(lastId);
+            setViewHistory(newHistory);
+        } else if (currentViewNode && currentViewNode.isRoot) {
+             setCurrentViewId(ALL_PAGES_ROOT_ID);
+        } else if (currentViewNode && !currentViewNode.isRoot) {
+             setCurrentViewId(ALL_PAGES_ROOT_ID);
+        }
+    };
+    
+    const handleDrillDown = (nodeId) => {
+        if (nodes[nodeId]?.isRoot) {
+            setViewHistory([]); 
+            setCurrentViewId(nodeId); 
+        } else {
+            setViewHistory(prev => [...prev, currentViewId]);
+            setCurrentViewId(nodeId);
+        }
+        // 实时更新编辑器的目标父节点
+        setTaskCreationData(prev => ({ ...prev, parentId: nodeId }));
+    };
+
+    const handleSelectTask = (nodeId) => {
+        const targetNode = nodes[nodeId];
+        const data = quickAddState.targetData;
+        
+        if (isSelectMode && targetNode && !targetNode.isRoot && data && data.type === 'slot') {
+            const newSlot = { date: data.date, period: data.period };
+            const exists = targetNode.plannedSlots?.some(s => s.date === data.date && s.period === data.period);
+            if (!exists) {
+                updateNodeData(nodeId, { plannedSlots: [...(targetNode.plannedSlots || []), newSlot] });
+            }
+            setQuickAddState({ visible: false, mode: 'create', targetData: null });
+        }
+    };
+    
+    const handleCreationSwitch = () => {
+        // 🟢 核心修复：手动同步当前 viewId 到编辑器数据，确保“添加”按钮点击后，右侧知道父节点是谁
+        const newCreationData = { 
+            parentId: currentViewId, // 关键：使用当前导航到的位置
+            text: '',
+            ...quickAddState.targetData 
+        };
+        setTaskCreationData(newCreationData);
+
+        // 切换模式
+        setQuickAddState({ 
+            visible: true, 
+            mode: 'create', 
+            targetData: newCreationData 
+        });
+    };
+
+    const handleCreateTask = () => {
+        if (taskCreationData.parentId && taskCreationData.text.trim()) {
+            quickAddTask(taskCreationData.parentId, taskCreationData);
+        }
+    };
+    
+    if (!quickAddState.visible) return null;
+
+    // 显示右侧编辑区的条件：
+    // 1. 全局创建模式 (create) 且 已选定父节点 (非项目列表页)
+    // 2. 或者 已经被赋予了 parentId (比如从日程板切换过来)
+    const isCreationMode = quickAddState.mode === 'create' && currentViewId !== ALL_PAGES_ROOT_ID; 
+    
+    return (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center" onClick={() => setQuickAddState({ visible: false, mode: 'create', targetData: null })}>
+            <div className={`bg-gray-800 border border-gray-700 max-h-[90%] rounded-xl shadow-2xl flex overflow-hidden animate-in zoom-in-95 duration-200 ${isCreationMode ? 'w-[750px]' : 'w-96'}`} onClick={e => e.stopPropagation()}>
+                
+                {/* 左侧：导航区 */}
+                <div className={`flex flex-col ${isCreationMode ? 'w-1/2 border-r border-gray-700' : 'w-full'}`}>
+                    
+                    <div className="p-4 border-b border-gray-700 flex items-center justify-between bg-gray-900 flex-shrink-0">
+                        {(currentViewId !== ALL_PAGES_ROOT_ID) ? (
+                            <button onClick={goBack} className="text-gray-400 hover:text-white flex items-center gap-1">
+                                <ChevronLeft size={16} className="flex-shrink-0" /> 
+                                <span className="text-sm font-bold text-gray-200 truncate max-w-[150px]">
+                                    {nodes[currentViewId]?.text || nodes[currentViewId]?.title || '返回'}
+                                </span>
+                            </button>
+                        ) : (
+                             <span className="font-bold text-gray-200">选择目标项目</span>
+                        )}
+                        <button onClick={() => setQuickAddState({ visible: false, mode: 'create', targetData: null })} className="text-gray-400 hover:text-white"><X size={18} /></button>
+                    </div>
+
+                        {currentViewId !== ALL_PAGES_ROOT_ID && (
+                        <div className="px-4 py-2 bg-gray-700/30 border-b border-gray-700/50 flex items-center gap-1 text-xs text-gray-400 overflow-x-auto whitespace-nowrap flex-shrink-0">
+                            <Folder size={12} className="text-blue-400 flex-shrink-0" />
+                            {/* 动态计算并显示完整路径 */}
+                            {(() => {
+                                const fullPath = [];
+                                let curr = nodes[currentViewId];
+                                while (curr) {
+                                    fullPath.unshift(curr);
+                                    if (curr.isRoot || !curr.parentId) break;
+                                    curr = nodes[curr.parentId];
+                                }
+                                return fullPath.map((node, index) => (
+                                    <React.Fragment key={node.id}>
+                                        {index > 0 && <ChevronRight size={10} className="text-gray-600 flex-shrink-0" />}
+                                        <span className={index === fullPath.length - 1 ? "text-blue-300 font-medium" : ""}>
+                                            {node.text}
+                                        </span>
+                                    </React.Fragment>
+                                ));
+                            })()}
+                        </div>
+                    )}
+
+                    <div className="flex-1 overflow-y-auto p-4">
+                        <FlatNodeList 
+                            children={childrenToShow} 
+                            nodes={nodes} 
+                            currentViewId={currentViewId} 
+                            setCurrentViewId={handleDrillDown} 
+                            selectTask={handleSelectTask} 
+                            isSelectMode={isSelectMode}
+                            handleCreationSwitch={handleCreationSwitch}
+                            pages={pages}
+                        />
+                    </div>
+                </div>
+
+                {/* 右侧：编辑区 */}
+                {isCreationMode && (
+                    <div className="w-1/2 p-6 flex flex-col bg-gray-900/50">
+                        <h3 className="text-lg font-bold text-blue-300 mb-4 flex-shrink-0">创建任务</h3>
+                        <div className="text-sm text-gray-400 border-b border-gray-700 pb-1 mb-4 flex-shrink-0">
+                            将在  {nodes[taskCreationData.parentId]?.text || '项目根目录'} 下创建子任务
+                        </div>
+                        
+                        <input 
+                            autoFocus
+                            type="text"
+                            value={taskCreationData.text}
+                            onChange={(e) => setTaskCreationData(prev => ({ ...prev, text: e.target.value }))}
+                            placeholder="输入任务名称..."
+                            className="w-full text-lg bg-gray-800 border border-gray-700 rounded px-3 py-2 text-gray-200 outline-none focus:border-blue-500 mb-4 flex-shrink-0"
+                        />
+
+                        {taskCreationData.type === 'slot' && (
+                            <div className="text-xs text-purple-400 flex items-center gap-2 bg-purple-900/20 p-2 rounded mb-4 flex-shrink-0">
+                                <Clock size={14} /> 附加安排: {taskCreationData.date} {taskCreationData.period === 'morning' ? '上午' : taskCreationData.period === 'afternoon' ? '下午' : '晚上'}
+                            </div>
+                        )}
+                        
+                        <div className="flex-1 overflow-y-auto -mr-2 pr-2">
+                            <QuickTaskEditor 
+                                taskState={taskCreationData} 
+                                setTaskState={setTaskCreationData} 
+                            />
+                        </div>
+                        
+                        <button 
+                            onClick={handleCreateTask} 
+                            disabled={!taskCreationData.text.trim()} 
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 rounded transition-colors disabled:opacity-50 mt-4 flex-shrink-0"
+                        >
+                            创建任务并保存
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
 // --- 属性详情面板 (增加标题模式切换) ---
 const PropertiesPanel = ({ nodeId, node, updateNodeText, updateNodeData, onClose, moveNodeOrder, deleteNode, depth }) => {
   const [editDDLTime, setEditDDLTime] = useState(false);
@@ -907,6 +1367,11 @@ export default function MindMapTaskApp() {
   });
   
   const [history, setHistory] = useState([]); 
+  const [quickAddState, setQuickAddState] = useState({ 
+    visible: false, 
+    mode: 'create', // 'create' or 'select'
+    targetData: null // { type: 'slot', date: '...', period: '...' }
+});
   const [focusedNodeId, setFocusedNodeId] = useState(null);
   const [showCompleted, setShowCompleted] = useState(true);
   const [editingPageId, setEditingPageId] = useState(null);
@@ -943,7 +1408,7 @@ export default function MindMapTaskApp() {
       return depth;
   };
 
-  useEffect(() => { setFocusedNodeId(null); }, [activePageId]);
+
 
   const handleNodeFocus = (nodeId) => {
       setFocusedNodeId(nodeId);
@@ -1028,11 +1493,79 @@ export default function MindMapTaskApp() {
       if (current && current.isRoot) { const page = pages.find(p => p.rootId === current.id); return page ? page.id : null; }
       return null;
   };
-  const jumpToTask = (nodeId) => {
+  // --- 核心升级：跳转并定位任务 ---
+  // --- 核心升级：跳转并定位任务 (修复居中偏移 bug) ---
+ // --- 核心升级：跳转并定位任务 (终极版：自动展开 + 智能避让面板) ---
+  // --- 核心升级：跳转并定位任务 (修复分屏模式偏左问题) ---
+  // --- 核心升级：跳转并定位任务 (修复缩放导致的偏移误差) ---
+  const jumpToTask = (nodeId, keepSplitView = false) => {
       const targetPageId = findPageIdForNode(nodeId, nodes);
-      if (targetPageId && targetPageId !== activePageId) { setActivePageId(targetPageId); }
-      setViewMode('map');
-      setTimeout(() => setFocusedNodeId(nodeId), 50);
+      
+      // 1. 自动展开逻辑
+      let newNodes = { ...nodes };
+      let curr = newNodes[nodeId];
+      let needsUpdate = false;
+      if (curr && curr.parentId) {
+          let parent = newNodes[curr.parentId];
+          while (parent) {
+              if (parent.collapsed) {
+                  parent = { ...parent, collapsed: false };
+                  newNodes[parent.id] = parent;
+                  needsUpdate = true;
+              }
+              parent = newNodes[parent.parentId];
+          }
+      }
+      if (needsUpdate) setNodes(newNodes); 
+
+      // 2. 切换项目
+      if (targetPageId && targetPageId !== activePageId) { 
+          setActivePageId(targetPageId); 
+      }
+
+      // 3. 视图模式判断
+      const isSplitMode = keepSplitView && viewMode === 'split';
+      if (!isSplitMode) {
+          setViewMode('map');
+      }
+
+      // 4. 设置焦点
+      setFocusedNodeId(nodeId);
+
+      // 5. 核心：计算坐标并居中
+      setTimeout(() => {
+          const nodeEl = document.getElementById(`node-${nodeId}`);
+          const containerEl = containerRef.current;
+          
+          if (nodeEl && containerEl) {
+              const nodeRect = nodeEl.getBoundingClientRect();
+              const containerRect = containerEl.getBoundingClientRect();
+
+              // 智能判断面板遮挡
+              const panelOffset = isSplitMode ? 0 : 320;
+
+              // 计算“视觉可见区域”的中心坐标 (屏幕像素)
+              const visibleCenterX = containerRect.left + (containerRect.width - panelOffset) / 2;
+              const visibleCenterY = containerRect.top + containerRect.height / 2;
+
+              // 节点当前的中心坐标 (屏幕像素)
+              const nodeCenterX = nodeRect.left + nodeRect.width / 2;
+              const nodeCenterY = nodeRect.top + nodeRect.height / 2;
+
+              // 计算屏幕上的位移差 (Screen Delta)
+              const screenOffsetX = visibleCenterX - nodeCenterX;
+              const screenOffsetY = visibleCenterY - nodeCenterY;
+
+              // 🟢 关键修正：将屏幕位移转换为画布位移
+              // 我们需要除以当前的缩放比例 (prev.scale)
+              // 例如：缩小到0.5倍时，屏幕上移动100px，实际上需要画布移动200px
+              setTransform(prev => ({
+                  ...prev,
+                  x: prev.x + (screenOffsetX / prev.scale),
+                  y: prev.y + (screenOffsetY / prev.scale)
+              }));
+          }
+      }, 150);
   };
 
   const addSiblingNode = (currentNodeId) => {
@@ -1059,6 +1592,55 @@ export default function MindMapTaskApp() {
       const newNode = { id: newNodeId, text: '', children: [], parentId: PLANNER_HIDDEN_ROOT_ID, collapsed: false, isNew: true, completed: false, energy: 0, timeType: 'schedule', ddl: '', scheduleStart: '', scheduleEnd: '', notes: '', plannedSlots: [], isHeading: false, ...taskData };
       setNodesWithHistory(prev => ({ ...prev, [newNodeId]: newNode }));
   };
+
+// 新增 quickAddTask 函数 (放在 addChildNode/createPlannerTask 附近)
+const quickAddTask = (parentId, taskData = {}) => {
+  const newNodeId = generateId();
+  
+  // Logic to apply scheduling info for the PlannerBoard 'Add' button (Requirement 5)
+  let initialScheduleProps = {};
+  if (taskData.type === 'slot') {
+    initialScheduleProps = { 
+        plannedSlots: [{ date: taskData.date, period: taskData.period }], 
+    };
+  }
+
+  const newNode = { 
+    id: newNodeId, 
+    text: taskData.text || '', 
+    children: [], 
+    parentId: parentId, 
+    collapsed: false, 
+    isNew: true, 
+    completed: false, 
+    energy: 0, 
+    timeType: null, 
+    ddl: '', 
+    scheduleStart: '', 
+    scheduleEnd: '', 
+    notes: '', 
+    plannedSlots: [], 
+    isHeading: false, 
+    workload: 0,
+    ...taskData,
+    ...initialScheduleProps // 应用 plannedSlots
+  };
+  
+  const actualParentId = nodes[parentId] ? parentId : INITIAL_ROOT_ID;
+  
+  setNodesWithHistory(prev => ({ 
+    ...prev, 
+    [newNodeId]: newNode, 
+    [actualParentId]: { ...prev[actualParentId], children: [...prev[actualParentId].children, newNodeId] }
+  }));
+  
+  setQuickAddState({ visible: false, mode: 'create', targetData: null });
+
+  if (viewMode === 'map') {
+      jumpToTask(newNodeId);
+  }
+};
+
   const outdentNode = (nodeId) => {
     const node = nodes[nodeId];
     if (node.isRoot) return;
@@ -1220,6 +1802,28 @@ export default function MindMapTaskApp() {
 
   return (
     <div className="flex h-screen w-full bg-gray-900 text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
+      
+      <style>{`
+        /* 滚动条整体宽度/高度 */
+        ::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        /* 滚动条轨道 (背景) - 透明或深色 */
+        ::-webkit-scrollbar-track {
+          background: transparent; 
+        }
+        /* 滚动条滑块 (深灰色) */
+        ::-webkit-scrollbar-thumb {
+          background: #374151; /* gray-700 */
+          border-radius: 3px;
+        }
+        /* 鼠标悬停在滑块上 (稍亮一点) */
+        ::-webkit-scrollbar-thumb:hover {
+          background: #4b5563; /* gray-600 */
+        }
+      `}</style>
+      
       <div className="w-64 bg-gray-900 border-r border-gray-700 flex flex-col flex-shrink-0 z-20 shadow-sm">
         <div className="p-4 border-b border-gray-700 flex items-center justify-between cursor-pointer" onClick={() => changeViewMode('map')} title="返回默认视图"><h1 className="font-bold text-lg text-gray-200 flex items-center gap-2"><Layout className="w-5 h-5 text-blue-400" />MindTask</h1></div>
         <div className="flex-1 overflow-y-auto p-2">
@@ -1238,9 +1842,9 @@ export default function MindMapTaskApp() {
                      <button onClick={handleUndo} className="flex items-center gap-1 text-xs text-gray-500 hover:text-blue-400"><Undo size={12}/> 撤销 (Ctrl+Z)</button>
                  </div>
              )}
-          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 mt-4">项目列表</div>
+          <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 px-2 mt-4 border-t border-gray-700 pt-4">项目列表</div>
           {pages.map(page => (
-               <div key={page.id} onClick={() => setActivePageId(page.id)} onDoubleClick={() => setEditingPageId(page.id)} className={`flex items-center px-3 py-2 rounded-md cursor-pointer mb-1 text-sm transition-colors group relative ${activePageId === page.id ? 'bg-blue-900/30 text-blue-300 font-medium' : 'text-gray-400 hover:bg-gray-800'}`}>
+               <div key={page.id} onClick={() => { setActivePageId(page.id); setFocusedNodeId(null); }} onDoubleClick={() => setEditingPageId(page.id)} className={`flex items-center px-3 py-2 rounded-md cursor-pointer mb-1 text-sm transition-colors group relative ${activePageId === page.id ? 'bg-blue-900/30 text-blue-300 font-medium' : 'text-gray-400 hover:bg-gray-800'}`}>
                  <Folder size={16} className="mr-2 opacity-70 flex-shrink-0" />
                  {editingPageId === page.id ? (
                     <input autoFocus type="text" value={page.title} onChange={(e) => setPages(pages.map(p => p.id === page.id ? {...p, title: e.target.value} : p))} onBlur={() => setEditingPageId(null)} onKeyDown={(e) => e.key === 'Enter' && setEditingPageId(null)} className="bg-gray-700 border border-gray-600 rounded px-1 w-full outline-none text-gray-200" />
@@ -1274,7 +1878,19 @@ export default function MindMapTaskApp() {
              ))}
              
         </div>
-        <div className="p-3 border-t border-gray-700"><button onClick={addNewPage} className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-200 py-2 px-4 rounded-md text-sm transition-colors"><Plus size={16} /> 新建项目</button></div>
+    <div className="p-3 border-t border-gray-700">
+    {/* 新增：快速添加任务按钮 */}
+    <button 
+        onClick={() => setQuickAddState({ visible: true, mode: 'create', targetData: null })} 
+        className="w-full flex items-center justify-center gap-2 bg-blue-700 hover:bg-blue-600 text-white py-2 px-4 rounded-md text-sm transition-colors mb-2"
+    >
+        <Plus size={16} /> 快速添加任务
+    </button>
+
+    <button onClick={addNewPage} className="w-full flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-200 py-2 px-4 rounded-md text-sm transition-colors">
+        <Plus size={16} /> 新建项目
+    </button>
+    </div>
       </div>
 
       {viewMode === 'sorter' ? (
@@ -1282,7 +1898,7 @@ export default function MindMapTaskApp() {
       ) : (
           <div className="flex-1 flex overflow-hidden relative">
             {/* 修改点4：大幅降低背景点阵的透明度 (rgba(71, 85, 105, 0.2))，使其更低调 */}
-            <div ref={containerRef} className="flex-1 relative bg-gray-900 overflow-hidden cursor-grab active:cursor-grabbing" onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}>
+            <div ref={containerRef} style={{ transformOrigin: '0 0' }} className="flex-1 relative bg-gray-900 overflow-hidden cursor-grab active:cursor-grabbing" onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}>
                 <div className="absolute top-0 left-0 origin-top-left transition-transform duration-75 ease-out" style={{ transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`, width: '400%', height: '400%', left: '-150%', top: '-150%', backgroundImage: 'radial-gradient(rgba(71, 85, 105, 0.2) 1.5px, transparent 1.5px)', backgroundSize: '24px 24px', pointerEvents: 'none' }} />
                 
                 <div className="absolute top-4 left-4 z-30 bg-gray-900/90 backdrop-blur p-1.5 rounded-lg shadow border border-gray-700 flex items-center gap-2 text-xs" onMouseDown={(e) => e.stopPropagation()}>
@@ -1311,7 +1927,7 @@ export default function MindMapTaskApp() {
             </div>
 
             {viewMode === 'split' && (
-                <PlannerBoard nodes={nodes} updateNodeData={updateNodeData} createPlannerTask={createPlannerTask} updateNodeText={updateNodeText} jumpToTask={jumpToTask} deleteNode={deleteNode} showCompleted={showCompleted}/>
+                <PlannerBoard nodes={nodes} updateNodeData={updateNodeData} createPlannerTask={createPlannerTask} updateNodeText={updateNodeText} jumpToTask={jumpToTask} deleteNode={deleteNode} showCompleted={showCompleted} setQuickAddState={setQuickAddState} toggleComplete={toggleComplete}/>
             )}
           </div>
       )}
@@ -1319,6 +1935,17 @@ export default function MindMapTaskApp() {
       {focusedNodeId && nodes[focusedNodeId] && !nodes[focusedNodeId].isRoot && (
         <PropertiesPanel nodeId={focusedNodeId} node={nodes[focusedNodeId]} updateNodeText={updateNodeText} updateNodeData={updateNodeData} moveNodeOrder={moveNodeOrder} deleteNode={deleteNode} onClose={() => setFocusedNodeId(null)} depth={currentDepth} />
       )}
+
+      <NodePickerModal 
+          nodes={nodes} 
+          pages={pages}
+          activePageId={activePageId}
+          quickAddState={quickAddState} 
+          setQuickAddState={setQuickAddState} 
+          quickAddTask={quickAddTask} 
+          updateNodeData={updateNodeData}
+      />
+
     </div>
   );
 }
