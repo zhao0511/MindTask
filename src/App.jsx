@@ -93,6 +93,8 @@ const ALL_PAGES_ROOT_ID = 'all-pages-root';
 const INITIAL_PAGE_ID = 'page-1';
 const INITIAL_ROOT_ID = 'root-1';
 const PLANNER_HIDDEN_ROOT_ID = 'planner-hidden-root';
+const DEFAULT_TRANSFORM = Object.freeze({ x: 100, y: 100, scale: 1 });
+const ROOT_VIEW_LEFT_MARGIN = 24;
 
 const INITIAL_DATA = {
   pages: [
@@ -160,7 +162,6 @@ const INITIAL_DATA = {
       ddl: '',
       scheduleStart: `${getTodayStr()}T14:00`,
       scheduleEnd: `${getTodayStr()}T16:00`,
-      showSpecificTime: true,
       notes: '使用 Figma 进行设计',
       plannedSlots: [],
       isHeading: true
@@ -190,6 +191,7 @@ const AutoResizeTextarea = ({ value, onChange, onKeyDown, onFocus, className, pl
       </div>
       <textarea
         ref={textareaRef}
+        spellCheck={false}
         value={value}
         onChange={onChange}
         onKeyDown={onKeyDown}
@@ -302,7 +304,8 @@ const MindMapNode = ({
 
       {/* 修改点C：将透明度样式加在节点内容卡片容器上 */}
       <div className={`flex flex-col items-start justify-center mr-12 relative z-10 py-1 ${opacityClass}`}>
-        <div 
+        <div
+          id={`node-card-${nodeId}`}
           onDragOver={handleDragOver} onDrop={handleDrop} onClick={(e) => { e.stopPropagation(); onFocus && onFocus(nodeId); }}
           className={containerClass}
           style={nodeWidthStyle}
@@ -334,7 +337,7 @@ const MindMapNode = ({
           {(!node.isRoot && !isHeading && (node.timeType || node.energy > 0)) && (
             <div className="flex flex-wrap items-center mt-2 pl-6">
               {node.timeType === 'ddl' && node.ddl && <NodeBadge icon={CalendarIcon} className={getDDLStatusColor(node.ddl, node.workload)} text={formatTime(node.ddl)} />}
-              {node.timeType === 'schedule' && node.scheduleStart && node.showSpecificTime && <NodeBadge icon={Clock} className="bg-blue-900/30 text-blue-300 border-blue-800/50" text={renderScheduleTime()} />}
+              {node.timeType === 'schedule' && node.scheduleStart && <NodeBadge icon={Clock} className="bg-blue-900/30 text-blue-300 border-blue-800/50" text={renderScheduleTime()} />}
               {node.workload > 0 && <div className="flex gap-0.5 mr-2 mb-1 bg-purple-900/20 px-1.5 py-0.5 rounded-full border border-purple-800/50 h-5 items-center text-purple-400"><Weight size={10} /><span className="text-[10px] font-bold">{node.workload}</span></div>}
               {node.energy > 0 && <div className="flex gap-0.5 mr-2 mb-1 bg-yellow-900/20 px-1.5 py-0.5 rounded-full border border-yellow-800/50 h-5 items-center">{[...Array(node.energy)].map((_, i) => <Zap key={i} size={8} className="text-yellow-500 fill-current" />)}</div>}
             </div>
@@ -468,11 +471,10 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
   };
 
   const handleCreateTask = (period) => {
-      let defaultHour = 9;
-      if (period === 'afternoon') defaultHour = 14;
-      if (period === 'evening') defaultHour = 19;
-      const start = `${currentDate}T${String(defaultHour).padStart(2, '0')}:00`;
-      createPlannerTask({ scheduleStart: start, timeType: 'schedule', showSpecificTime: false, plannerRank: Date.now() });
+      createPlannerTask({
+          plannedSlots: [{ date: currentDate, period }],
+          plannerRank: Date.now()
+      });
   };
 
   const handleQuickSelect = (period) => {
@@ -548,7 +550,7 @@ const PlannerBoard = ({ nodes, updateNodeData, createPlannerTask, updateNodeText
                            <span>{formatTime(node.ddl)}</span>
                         </div>
                      )}
-                     {node.showSpecificTime && node.scheduleStart && (
+                     {node.timeType === 'schedule' && node.scheduleStart && (
                         <div className="h-5 flex items-center gap-1 px-1.5 rounded-full border text-[10px] whitespace-nowrap bg-blue-900/30 text-blue-300 border-blue-800/50">
                            <Clock size={10} />
                            <span>{new Date(node.scheduleStart).getHours() + ':' + String(new Date(node.scheduleStart).getMinutes()).padStart(2,'0')}</span>
@@ -852,10 +854,6 @@ const QuickTaskEditor = ({ taskState, setTaskState }) => {
               )}
               {taskState.timeType === 'schedule' && (
                 <div className="space-y-2 animate-in fade-in zoom-in duration-200">
-                    <div className="flex items-center gap-2 mb-2">
-                        <input type="checkbox" id="showTime" checked={!!taskState.showSpecificTime} onChange={(e) => updateTaskData({ showSpecificTime: e.target.checked })} />
-                        <label htmlFor="showTime" className="text-xs text-gray-500">在卡片上显示具体时间点</label>
-                    </div>
                     <div>
                         <label className="text-[10px] text-gray-500 mb-1 block">开始时间</label>
                         <input type="datetime-local" value={taskState.scheduleStart || ''} onChange={(e) => updateTaskData({ scheduleStart: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
@@ -1292,10 +1290,6 @@ const PropertiesPanel = ({ nodeId, node, updateNodeText, updateNodeData, onClose
           )}
           {node.timeType === 'schedule' && (
               <div className="space-y-2 animate-in fade-in zoom-in duration-200">
-                   <div className="flex items-center gap-2 mb-2">
-                       <input type="checkbox" id="showTime" checked={!!node.showSpecificTime} onChange={(e) => updateNodeData(nodeId, { showSpecificTime: e.target.checked })} />
-                       <label htmlFor="showTime" className="text-xs text-gray-500">在卡片上显示具体时间点</label>
-                   </div>
                    <div>
                         <label className="text-[10px] text-gray-500 mb-1 block">开始时间</label>
                         <input type="datetime-local" value={node.scheduleStart || ''} onChange={(e) => updateNodeData(nodeId, { scheduleStart: e.target.value })} className="w-full border border-gray-600 bg-gray-900 text-gray-200 rounded px-3 py-2 text-sm focus:border-blue-500 outline-none" style={{ colorScheme: 'dark' }} />
@@ -1445,15 +1439,40 @@ const [showRedDot, setShowRedDot] = useState(false);
     visible: false, 
     mode: 'create', // 'create' or 'select'
     targetData: null // { type: 'slot', date: '...', period: '...' }
-});
+  });
   const [focusedNodeId, setFocusedNodeId] = useState(null);
-  const [showCompleted, setShowCompleted] = useState(true);
+  const [showCompleted, setShowCompleted] = useState(false);
   const [editingPageId, setEditingPageId] = useState(null);
   const [viewMode, setViewMode] = useState('map'); 
   const [projectEnergyFilter, setProjectEnergyFilter] = useState(0); 
 
-  // 修改点5：调整初始和复位坐标到更中心的位置 (例如 100, 100)
-  const [transform, setTransform] = useState({ x: 100, y: 100, scale: 1 });
+  const [pageTransforms, setPageTransforms] = useState(() => {
+      const saved = localStorage.getItem('mindtask-pageTransforms');
+      if (!saved) return {};
+
+      try {
+          const parsed = JSON.parse(saved);
+          return Object.fromEntries(Object.entries(parsed).filter(([, value]) => (
+              value && Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.scale)
+          )));
+      } catch {
+          return {};
+      }
+  });
+  const transform = pageTransforms[activePageId] || DEFAULT_TRANSFORM;
+  const updatePageTransform = useCallback((pageId, nextTransform) => {
+      if (!pageId) return;
+      setPageTransforms(prev => {
+          const currentTransform = prev[pageId] || DEFAULT_TRANSFORM;
+          const resolvedTransform = typeof nextTransform === 'function'
+              ? nextTransform(currentTransform)
+              : nextTransform;
+          return { ...prev, [pageId]: resolvedTransform };
+      });
+  }, []);
+  const setTransform = useCallback((nextTransform) => {
+      updatePageTransform(activePageId, nextTransform);
+  }, [activePageId, updatePageTransform]);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const containerRef = useRef(null); 
@@ -1502,6 +1521,10 @@ const handleOpenAbout = () => {
   useEffect(() => {
     localStorage.setItem('mindtask-activePageId', activePageId);
   }, [activePageId]);
+
+  useEffect(() => {
+    localStorage.setItem('mindtask-pageTransforms', JSON.stringify(pageTransforms));
+  }, [pageTransforms]);
 
   // 辅助：计算节点深度
   const getNodeDepth = (targetId, currentNodes) => {
@@ -1640,7 +1663,7 @@ const handleOpenAbout = () => {
 
       // 5. 核心：计算坐标并居中
       setTimeout(() => {
-          const nodeEl = document.getElementById(`node-${nodeId}`);
+          const nodeEl = document.getElementById(`node-card-${nodeId}`);
           const containerEl = containerRef.current;
           
           if (nodeEl && containerEl) {
@@ -1662,13 +1685,10 @@ const handleOpenAbout = () => {
               const screenOffsetX = visibleCenterX - nodeCenterX;
               const screenOffsetY = visibleCenterY - nodeCenterY;
 
-              // 🟢 关键修正：将屏幕位移转换为画布位移
-              // 我们需要除以当前的缩放比例 (prev.scale)
-              // 例如：缩小到0.5倍时，屏幕上移动100px，实际上需要画布移动200px
-              setTransform(prev => ({
+              updatePageTransform(targetPageId || activePageId, prev => ({
                   ...prev,
-                  x: prev.x + (screenOffsetX / prev.scale),
-                  y: prev.y + (screenOffsetY / prev.scale)
+                  x: prev.x + screenOffsetX,
+                  y: prev.y + screenOffsetY
               }));
           }
       }, 150);
@@ -1695,7 +1715,7 @@ const handleOpenAbout = () => {
   };
   const createPlannerTask = (taskData) => {
       const newNodeId = generateId();
-      const newNode = { id: newNodeId, text: '', children: [], parentId: PLANNER_HIDDEN_ROOT_ID, collapsed: false, isNew: true, completed: false, energy: 0, timeType: 'schedule', ddl: '', scheduleStart: '', scheduleEnd: '', notes: '', plannedSlots: [], isHeading: false, ...taskData };
+      const newNode = { id: newNodeId, text: '', children: [], parentId: PLANNER_HIDDEN_ROOT_ID, collapsed: false, isNew: true, completed: false, energy: 0, timeType: null, ddl: '', scheduleStart: '', scheduleEnd: '', notes: '', plannedSlots: [], isHeading: false, ...taskData };
       setNodesWithHistory(prev => ({ ...prev, [newNodeId]: newNode }));
   };
 
@@ -1892,6 +1912,11 @@ const quickAddTask = (parentId, taskData = {}) => {
         if (activePageId === pageId) {
             setActivePageId(newPages[0].id);
         }
+        setPageTransforms(prev => {
+            const next = { ...prev };
+            delete next[pageId];
+            return next;
+        });
     }
   };
   const addNewPage = () => {
@@ -1903,11 +1928,29 @@ const quickAddTask = (parentId, taskData = {}) => {
 
   const activePage = pages.find(p => p.id === activePageId);
   const activeRootId = activePage ? activePage.rootId : null;
+
+  const locateRootNode = () => {
+      const rootCard = activeRootId ? document.getElementById(`node-card-${activeRootId}`) : null;
+      const container = containerRef.current;
+      if (!rootCard || !container || transform.scale <= 0) return;
+
+      const rootRect = rootCard.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const logicalLeft = (rootRect.left - containerRect.left - transform.x) / transform.scale;
+      const logicalTop = (rootRect.top - containerRect.top - transform.y) / transform.scale;
+      const logicalHeight = rootRect.height / transform.scale;
+
+      setTransform({
+          x: ROOT_VIEW_LEFT_MARGIN - logicalLeft,
+          y: containerRect.height / 2 - logicalTop - logicalHeight / 2,
+          scale: 1
+      });
+  };
   
   const currentDepth = focusedNodeId ? getNodeDepth(focusedNodeId, nodes) : 0;
 
   return (
-    <div className="flex h-screen w-full bg-gray-900 text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
+    <div spellCheck={false} className="flex h-screen w-full bg-gray-900 text-gray-200 overflow-hidden font-sans selection:bg-blue-500/30">
       
       <style>{`
         /* 滚动条整体宽度/高度 */
@@ -2040,8 +2083,7 @@ const quickAddTask = (parentId, taskData = {}) => {
                     <span className="text-xs text-gray-400 w-8 text-center">{Math.round(transform.scale * 100)}%</span>
                     <button className="p-1.5 hover:bg-gray-800 rounded text-gray-400" onClick={() => setTransform(prev => ({ ...prev, scale: Math.max(0.1, prev.scale - 0.1) }))}><Minimize size={18} /></button>
                     <div className="w-px h-4 bg-gray-700 mx-1" />
-                    {/* 修改点5：点击复位按钮回到更中心的坐标 (100, 100) */}
-                    <button className="p-1.5 hover:bg-gray-800 rounded text-gray-400" onClick={() => setTransform({ x: 100, y: 100, scale: 1 })}><MousePointer2 size={18} /></button>
+                    <button className="p-1.5 hover:bg-gray-800 rounded text-gray-400" onClick={locateRootNode} title="定位到根节点"><MousePointer2 size={18} /></button>
                 </div>
             </div>
 

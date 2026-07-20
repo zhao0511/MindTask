@@ -43,7 +43,8 @@ function createWindow() {
     title: "MindTask",
     webPreferences: {
       nodeIntegration: true, // 允许在渲染进程使用 Node API
-      contextIsolation: false, 
+      contextIsolation: false,
+      spellcheck: false,
     },
     autoHideMenuBar: true, 
     icon: path.join(__dirname, '../public/icon.ico') 
